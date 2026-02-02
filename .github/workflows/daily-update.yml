@@ -1,0 +1,103 @@
+name: Daily Database Update
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Build merge tool
+        run: |
+          go build -o merge-tool ./cmd/merge
+
+      - name: Run merge tool
+        run: |
+          ./merge-tool
+
+      - name: Verify output file
+        run: |
+          if [ ! -f "Merged-IP.mmdb" ]; then
+            echo "Error: Output file not found"
+            exit 1
+          fi
+          
+          FILE_SIZE=$(stat -c%s "Merged-IP.mmdb")
+          echo "Output file size: $FILE_SIZE bytes"
+          
+          if [ "$FILE_SIZE" -lt 1000000 ]; then
+            echo "Error: Output file is too small (< 1MB), likely corrupted"
+            exit 1
+          fi
+          
+          echo "Output file verified successfully"
+
+      - name: Set release variables
+        run: |
+          echo "TAG_NAME=$(TZ=UTC date +"%Y.%m.%d")" >> $GITHUB_ENV
+          echo "RELEASE_TIME=$(TZ=UTC date +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_ENV
+
+      - name: Upload to Releases
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Merged IP Database ${{ env.TAG_NAME }}
+          body: |
+            Merged IP geolocation database updated on ${{ env.RELEASE_TIME }}
+            
+            ## Data Sources
+            - **GeoLite2-City** - Primary source for country, city, coordinates, timezone, and multi-language names
+            - **GeoLite2-ASN** - Fallback source for ASN data
+            - **IPinfo Lite** - Primary source for ASN, AS organization, and AS domain
+            - **DB-IP City** - Supplementary source for geo data
+            
+            ## Features
+            - Unified IPv6 database (with IPv4 aliasing)
+            - Multi-language support: de, en, es, fr, ja, pt-BR, ru, zh-CN
+            - Priority-based field-level merge for maximum accuracy
+            
+            ## Usage
+            ```bash
+            # Download
+            wget https://github.com/${{ github.repository }}/releases/latest/download/Merged-IP.mmdb
+            
+            # Lookup example (using mmdblookup)
+            mmdblookup --file Merged-IP.mmdb --ip 8.8.8.8
+            ```
+          files: |
+            Merged-IP.mmdb
+          make_latest: true
+          fail_on_unmatched_files: true
+
+      - name: Remove old Releases
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        with:
+          keep_latest: 2
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          retain_days: 0
+          keep_minimum_runs: 2
