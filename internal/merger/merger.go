@@ -15,10 +15,12 @@ import (
 
 // Merger handles the merging of multiple IP databases
 type Merger struct {
-	geoLiteCity *reader.GeoLite2CityReader
-	geoLiteASN  *reader.GeoLite2ASNReader
-	ipinfoLite  *reader.IPinfoLiteReader
-	dbipCity    *reader.DBIPCityReader
+	geoLiteCity     *reader.GeoLite2CityReader
+	geoLiteASN      *reader.GeoLite2ASNReader
+	ipinfoLite      *reader.IPinfoLiteReader
+	dbipCity        *reader.DBIPCityReader
+	routeViewsASN   *reader.RouteViewsASNReader
+	geoWhoisCountry *reader.GeoWhoisCountryReader
 
 	tree *mmdbwriter.Tree
 
@@ -27,13 +29,15 @@ type Merger struct {
 
 // Stats holds merge statistics
 type Stats struct {
-	TotalNetworks     int64
-	GeoLiteCityHits   int64
-	GeoLiteASNHits    int64
-	IPinfoLiteHits    int64
-	DBIPHits          int64
-	EmptyRecords      int64
-	ProcessedNetworks int64
+	TotalNetworks       int64
+	GeoLiteCityHits     int64
+	GeoLiteASNHits      int64
+	IPinfoLiteHits      int64
+	DBIPHits            int64
+	RouteViewsASNHits   int64
+	GeoWhoisCountryHits int64
+	EmptyRecords        int64
+	ProcessedNetworks   int64
 }
 
 // New creates a new Merger instance
@@ -64,6 +68,25 @@ func New() (*Merger, error) {
 		return nil, fmt.Errorf("failed to open DB-IP City: %w", err)
 	}
 
+	routeViewsASN, err := reader.OpenRouteViewsASN()
+	if err != nil {
+		geoLiteCity.Close()
+		geoLiteASN.Close()
+		ipinfoLite.Close()
+		dbipCity.Close()
+		return nil, fmt.Errorf("failed to open RouteViews ASN: %w", err)
+	}
+
+	geoWhoisCountry, err := reader.OpenGeoWhoisCountry()
+	if err != nil {
+		geoLiteCity.Close()
+		geoLiteASN.Close()
+		ipinfoLite.Close()
+		dbipCity.Close()
+		routeViewsASN.Close()
+		return nil, fmt.Errorf("failed to open GeoWhois Country: %w", err)
+	}
+
 	tree, err := mmdbwriter.New(mmdbwriter.Options{
 		DatabaseType:            config.DatabaseType,
 		Description:             map[string]string{"en": config.DatabaseDescription},
@@ -78,15 +101,19 @@ func New() (*Merger, error) {
 		geoLiteASN.Close()
 		ipinfoLite.Close()
 		dbipCity.Close()
+		routeViewsASN.Close()
+		geoWhoisCountry.Close()
 		return nil, fmt.Errorf("failed to create mmdb tree: %w", err)
 	}
 
 	return &Merger{
-		geoLiteCity: geoLiteCity,
-		geoLiteASN:  geoLiteASN,
-		ipinfoLite:  ipinfoLite,
-		dbipCity:    dbipCity,
-		tree:        tree,
+		geoLiteCity:     geoLiteCity,
+		geoLiteASN:      geoLiteASN,
+		ipinfoLite:      ipinfoLite,
+		dbipCity:        dbipCity,
+		routeViewsASN:   routeViewsASN,
+		geoWhoisCountry: geoWhoisCountry,
+		tree:            tree,
 	}, nil
 }
 
@@ -111,6 +138,16 @@ func (m *Merger) Close() error {
 	}
 	if m.dbipCity != nil {
 		if err := m.dbipCity.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if m.routeViewsASN != nil {
+		if err := m.routeViewsASN.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if m.geoWhoisCountry != nil {
+		if err := m.geoWhoisCountry.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -281,6 +318,7 @@ func (m *Merger) buildMergedRecord(network *net.IPNet, geoRecord *reader.GeoLite
 	}
 
 	m.enrichWithASNData(network.IP, record)
+	m.enrichWithCountryFallback(network.IP, record)
 
 	return record
 }
@@ -322,12 +360,27 @@ func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reade
 	}
 
 	m.enrichWithASNData(network.IP, record)
+	m.enrichWithCountryFallback(network.IP, record)
 
 	return record
 }
 
-// enrichWithASNData adds ASN information from IPinfo Lite (primary) or GeoLite2-ASN (fallback)
+// enrichWithCountryFallback adds country information from GeoWhois when country is missing
+func (m *Merger) enrichWithCountryFallback(ip net.IP, record *MergedRecord) {
+	if record.Country.ISOCode != "" {
+		return
+	}
+
+	geoWhoisRecord, err := m.geoWhoisCountry.Lookup(ip)
+	if err == nil && geoWhoisRecord.HasCountry() {
+		atomic.AddInt64(&m.stats.GeoWhoisCountryHits, 1)
+		record.Country.ISOCode = geoWhoisRecord.CountryCode
+	}
+}
+
+// enrichWithASNData adds ASN information from IPinfo Lite (primary), GeoLite2-ASN (secondary), or RouteViews (tertiary)
 func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
+	// Priority 1: IPinfo Lite (includes as_domain)
 	ipinfoRecord, err := m.ipinfoLite.Lookup(ip)
 	if err == nil && ipinfoRecord.HasASN() {
 		atomic.AddInt64(&m.stats.IPinfoLiteHits, 1)
@@ -339,12 +392,24 @@ func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 		return
 	}
 
+	// Priority 2: GeoLite2-ASN
 	asnRecord, err := m.geoLiteASN.Lookup(ip)
 	if err == nil && asnRecord.HasASN() {
 		atomic.AddInt64(&m.stats.GeoLiteASNHits, 1)
 		record.ASN = ASNRecord{
 			Number:       asnRecord.AutonomousSystemNumber,
 			Organization: asnRecord.AutonomousSystemOrganization,
+		}
+		return
+	}
+
+	// Priority 3: RouteViews ASN
+	routeViewsRecord, err := m.routeViewsASN.Lookup(ip)
+	if err == nil && routeViewsRecord.HasASN() {
+		atomic.AddInt64(&m.stats.RouteViewsASNHits, 1)
+		record.ASN = ASNRecord{
+			Number:       routeViewsRecord.AutonomousSystemNumber,
+			Organization: routeViewsRecord.AutonomousSystemOrganization,
 		}
 	}
 }
@@ -399,7 +464,9 @@ func (m *Merger) printStats() {
 	fmt.Printf("  GeoLite2-City hits: %d\n", m.stats.GeoLiteCityHits)
 	fmt.Printf("  GeoLite2-ASN hits: %d\n", m.stats.GeoLiteASNHits)
 	fmt.Printf("  IPinfo Lite hits: %d\n", m.stats.IPinfoLiteHits)
+	fmt.Printf("  RouteViews ASN hits: %d\n", m.stats.RouteViewsASNHits)
 	fmt.Printf("  DB-IP supplementary records: %d\n", m.stats.DBIPHits)
+	fmt.Printf("  GeoWhois Country fallback hits: %d\n", m.stats.GeoWhoisCountryHits)
 	fmt.Printf("  Empty records skipped: %d\n", m.stats.EmptyRecords)
 	fmt.Printf("  Final network count: %d\n", m.stats.ProcessedNetworks)
 }

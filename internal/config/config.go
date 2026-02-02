@@ -2,20 +2,24 @@ package config
 
 // Database download URLs
 const (
-	GeoLite2CityURL = "https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-City.mmdb"
-	GeoLite2ASNURL  = "https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb"
-	IPinfoLiteURL   = "https://github.com/NetworkCats/IPinfoLite-Download/releases/latest/download/ipinfo_lite.mmdb"
-	DBIPCityIPv4URL = "https://unpkg.com/@ip-location-db/dbip-city-mmdb/dbip-city-ipv4.mmdb"
-	DBIPCityIPv6URL = "https://unpkg.com/@ip-location-db/dbip-city-mmdb/dbip-city-ipv6.mmdb"
+	GeoLite2CityURL    = "https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-City.mmdb"
+	GeoLite2ASNURL     = "https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb"
+	IPinfoLiteURL      = "https://github.com/NetworkCats/IPinfoLite-Download/releases/latest/download/ipinfo_lite.mmdb"
+	DBIPCityIPv4URL    = "https://unpkg.com/@ip-location-db/dbip-city-mmdb/dbip-city-ipv4.mmdb"
+	DBIPCityIPv6URL    = "https://unpkg.com/@ip-location-db/dbip-city-mmdb/dbip-city-ipv6.mmdb"
+	RouteViewsASNURL   = "https://cdn.jsdelivr.net/npm/@ip-location-db/asn-mmdb/asn.mmdb"
+	GeoWhoisCountryURL = "https://cdn.jsdelivr.net/npm/@ip-location-db/geolite2-geo-whois-asn-country-mmdb/geolite2-geo-whois-asn-country.mmdb"
 )
 
 // Local file paths for downloaded databases
 const (
-	GeoLite2CityFile = "download/GeoLite2-City.mmdb"
-	GeoLite2ASNFile  = "download/GeoLite2-ASN.mmdb"
-	IPinfoLiteFile   = "download/ipinfo_lite.mmdb"
-	DBIPCityIPv4File = "download/dbip-city-ipv4.mmdb"
-	DBIPCityIPv6File = "download/dbip-city-ipv6.mmdb"
+	GeoLite2CityFile    = "download/GeoLite2-City.mmdb"
+	GeoLite2ASNFile     = "download/GeoLite2-ASN.mmdb"
+	IPinfoLiteFile      = "download/ipinfo_lite.mmdb"
+	DBIPCityIPv4File    = "download/dbip-city-ipv4.mmdb"
+	DBIPCityIPv6File    = "download/dbip-city-ipv6.mmdb"
+	RouteViewsASNFile   = "download/routeviews-asn.mmdb"
+	GeoWhoisCountryFile = "download/geolite2-geo-whois-asn-country.mmdb"
 )
 
 // Output file path
@@ -46,7 +50,7 @@ const (
 	DownloadTimeout     = 300 // seconds
 	DownloadMaxRetries  = 3
 	DownloadRetryDelay  = 5 // seconds
-	DownloadConcurrency = 5
+	DownloadConcurrency = 7
 )
 
 // DatabaseSource represents a database source with its URL and local path
@@ -64,5 +68,7 @@ func GetAllSources() []DatabaseSource {
 		{Name: "IPinfo-Lite", URL: IPinfoLiteURL, Path: IPinfoLiteFile},
 		{Name: "DB-IP-IPv4", URL: DBIPCityIPv4URL, Path: DBIPCityIPv4File},
 		{Name: "DB-IP-IPv6", URL: DBIPCityIPv6URL, Path: DBIPCityIPv6File},
+		{Name: "RouteViews-ASN", URL: RouteViewsASNURL, Path: RouteViewsASNFile},
+		{Name: "GeoWhois-Country", URL: GeoWhoisCountryURL, Path: GeoWhoisCountryFile},
 	}
 }

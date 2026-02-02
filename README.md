@@ -7,21 +7,24 @@ A Go program that merges multiple IP geolocation databases into a single, compre
 | Source | Primary Use | Coverage |
 |--------|-------------|----------|
 | [GeoLite2-City](https://github.com/P3TERX/GeoLite.mmdb) | Country, city, coordinates, timezone, subdivisions, multi-language names | IPv4 + IPv6 |
-| [GeoLite2-ASN](https://github.com/P3TERX/GeoLite.mmdb) | ASN fallback | IPv4 + IPv6 |
-| [IPinfo Lite](https://github.com/NetworkCats/IPinfoLite-Download) | ASN, AS organization, AS domain | IPv4 + IPv6 |
+| [GeoLite2-ASN](https://github.com/P3TERX/GeoLite.mmdb) | ASN fallback (secondary) | IPv4 + IPv6 |
+| [IPinfo Lite](https://github.com/NetworkCats/IPinfoLite-Download) | ASN, AS organization, AS domain (primary) | IPv4 + IPv6 |
 | [DB-IP City](https://db-ip.com/) | Supplementary geo data | IPv4 + IPv6 |
+| [RouteViews ASN](https://www.npmjs.com/package/@ip-location-db/asn-mmdb) | ASN fallback (tertiary) | IPv4 + IPv6 |
+| [GeoLite2-Geo-Whois-ASN-Country](https://www.npmjs.com/package/@ip-location-db/geolite2-geo-whois-asn-country-mmdb) | Country fallback | IPv4 + IPv6 |
 
 ## Merge Priority
 
 The merge logic uses a priority-based approach to select the most accurate data for each field:
 
-| Data Field | Primary Source | Fallback Source |
-|------------|----------------|-----------------|
-| Country, City, Coordinates | GeoLite2-City | DB-IP |
-| Timezone, Subdivisions | GeoLite2-City | DB-IP |
-| Multi-language Names | GeoLite2-City | - |
-| ASN, AS Organization | IPinfo Lite | GeoLite2-ASN |
-| AS Domain | IPinfo Lite | - |
+| Data Field | Priority 1 | Priority 2 | Priority 3 |
+|------------|------------|------------|------------|
+| Country | GeoLite2-City | DB-IP | GeoWhois-Country |
+| City, Coordinates | GeoLite2-City | DB-IP | - |
+| Timezone, Subdivisions | GeoLite2-City | DB-IP | - |
+| Multi-language Names | GeoLite2-City | - | - |
+| ASN, AS Organization | IPinfo Lite | GeoLite2-ASN | RouteViews ASN |
+| AS Domain | IPinfo Lite | - | - |
 
 ## Output Format
 
@@ -201,5 +204,7 @@ This project merges data from multiple sources. Please refer to each source's li
 - GeoLite2: [MaxMind GeoLite2 End User License Agreement](https://www.maxmind.com/en/geolite2/eula)
 - IPinfo Lite: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
 - DB-IP: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- RouteViews ASN: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
+- ip-location-db databases: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 
 The merge tool source code is provided as-is for educational and personal use.
