@@ -2,8 +2,8 @@ package merger
 
 import (
 	"fmt"
+	"io"
 	"net"
-	"sync/atomic"
 	"time"
 
 	"merged-ip-data/internal/config"
@@ -12,6 +12,22 @@ import (
 	"github.com/maxmind/mmdbwriter"
 	"github.com/maxmind/mmdbwriter/mmdbtype"
 )
+
+// closerList holds a list of io.Closers for cleanup
+type closerList []io.Closer
+
+// closeAll closes all resources and returns the first error encountered
+func (cl closerList) closeAll() error {
+	var firstErr error
+	for _, c := range cl {
+		if c != nil {
+			if err := c.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
 
 // Merger handles the merging of multiple IP databases
 type Merger struct {
@@ -42,50 +58,49 @@ type Stats struct {
 
 // New creates a new Merger instance
 func New() (*Merger, error) {
+	var closers closerList
+	cleanup := func() { closers.closeAll() }
+
 	geoLiteCity, err := reader.OpenGeoLite2City()
 	if err != nil {
 		return nil, fmt.Errorf("failed to open GeoLite2-City: %w", err)
 	}
+	closers = append(closers, geoLiteCity)
 
 	geoLiteASN, err := reader.OpenGeoLite2ASN()
 	if err != nil {
-		geoLiteCity.Close()
+		cleanup()
 		return nil, fmt.Errorf("failed to open GeoLite2-ASN: %w", err)
 	}
+	closers = append(closers, geoLiteASN)
 
 	ipinfoLite, err := reader.OpenIPinfoLite()
 	if err != nil {
-		geoLiteCity.Close()
-		geoLiteASN.Close()
+		cleanup()
 		return nil, fmt.Errorf("failed to open IPinfo Lite: %w", err)
 	}
+	closers = append(closers, ipinfoLite)
 
 	dbipCity, err := reader.OpenDBIPCity()
 	if err != nil {
-		geoLiteCity.Close()
-		geoLiteASN.Close()
-		ipinfoLite.Close()
+		cleanup()
 		return nil, fmt.Errorf("failed to open DB-IP City: %w", err)
 	}
+	closers = append(closers, dbipCity)
 
 	routeViewsASN, err := reader.OpenRouteViewsASN()
 	if err != nil {
-		geoLiteCity.Close()
-		geoLiteASN.Close()
-		ipinfoLite.Close()
-		dbipCity.Close()
+		cleanup()
 		return nil, fmt.Errorf("failed to open RouteViews ASN: %w", err)
 	}
+	closers = append(closers, routeViewsASN)
 
 	geoWhoisCountry, err := reader.OpenGeoWhoisCountry()
 	if err != nil {
-		geoLiteCity.Close()
-		geoLiteASN.Close()
-		ipinfoLite.Close()
-		dbipCity.Close()
-		routeViewsASN.Close()
+		cleanup()
 		return nil, fmt.Errorf("failed to open GeoWhois Country: %w", err)
 	}
+	closers = append(closers, geoWhoisCountry)
 
 	tree, err := mmdbwriter.New(mmdbwriter.Options{
 		DatabaseType:            config.DatabaseType,
@@ -97,12 +112,7 @@ func New() (*Merger, error) {
 		DisableIPv4Aliasing:     false,
 	})
 	if err != nil {
-		geoLiteCity.Close()
-		geoLiteASN.Close()
-		ipinfoLite.Close()
-		dbipCity.Close()
-		routeViewsASN.Close()
-		geoWhoisCountry.Close()
+		cleanup()
 		return nil, fmt.Errorf("failed to create mmdb tree: %w", err)
 	}
 
@@ -184,27 +194,33 @@ func (m *Merger) Merge() error {
 func (m *Merger) processGeoLiteCityNetworks() error {
 	networks := m.geoLiteCity.Networks()
 
+	// Reuse a single record to reduce allocations
+	var record MergedRecord
+
 	for networks.Next() {
 		var geoRecord reader.GeoLite2CityRecord
 		network, err := networks.Network(&geoRecord)
 		if err != nil {
+			fmt.Printf("Warning: failed to read network: %v\n", err)
 			continue
 		}
 
-		atomic.AddInt64(&m.stats.TotalNetworks, 1)
+		m.stats.TotalNetworks++
 
-		record := m.buildMergedRecord(network, &geoRecord)
+		record.Reset()
+		m.buildMergedRecord(network, &geoRecord, &record)
 
 		if record.IsEmpty() {
-			atomic.AddInt64(&m.stats.EmptyRecords, 1)
+			m.stats.EmptyRecords++
 			continue
 		}
 
 		if err := m.tree.Insert(network, record.ToMMDBType()); err != nil {
+			fmt.Printf("Warning: failed to insert network %s: %v\n", network, err)
 			continue
 		}
 
-		atomic.AddInt64(&m.stats.ProcessedNetworks, 1)
+		m.stats.ProcessedNetworks++
 
 		if m.stats.ProcessedNetworks%100000 == 0 {
 			fmt.Printf("  Processed %d networks...\n", m.stats.ProcessedNetworks)
@@ -225,10 +241,14 @@ func (m *Merger) processDBIPNetworks() error {
 func (m *Merger) processDBIPReader(r *reader.Reader) error {
 	networks := r.Networks()
 
+	// Reuse a single record to reduce allocations
+	var record MergedRecord
+
 	for networks.Next() {
 		var dbipRecord reader.DBIPCityRecord
 		network, err := networks.Network(&dbipRecord)
 		if err != nil {
+			fmt.Printf("Warning: failed to read DB-IP network: %v\n", err)
 			continue
 		}
 
@@ -243,48 +263,50 @@ func (m *Merger) processDBIPReader(r *reader.Reader) error {
 			continue
 		}
 
-		atomic.AddInt64(&m.stats.TotalNetworks, 1)
+		m.stats.TotalNetworks++
 
-		record := m.buildMergedRecordFromDBIP(network, &dbipRecord)
+		record.Reset()
+		m.buildMergedRecordFromDBIP(network, &dbipRecord, &record)
 
 		if record.IsEmpty() {
-			atomic.AddInt64(&m.stats.EmptyRecords, 1)
+			m.stats.EmptyRecords++
 			continue
 		}
 
-		if err := m.insertWithMerge(network, record); err != nil {
+		if err := m.insertWithMerge(network, &record); err != nil {
+			fmt.Printf("Warning: failed to insert DB-IP network %s: %v\n", network, err)
 			continue
 		}
 
-		atomic.AddInt64(&m.stats.DBIPHits, 1)
-		atomic.AddInt64(&m.stats.ProcessedNetworks, 1)
+		m.stats.DBIPHits++
+		m.stats.ProcessedNetworks++
 	}
 
 	return networks.Err()
 }
 
-// buildMergedRecord creates a merged record for a network using GeoLite2-City as primary
-func (m *Merger) buildMergedRecord(network *net.IPNet, geoRecord *reader.GeoLite2CityRecord) *MergedRecord {
-	record := &MergedRecord{}
-
+// buildMergedRecord creates a merged record for a network using GeoLite2-City as primary.
+// The record parameter should be pre-reset before calling this function.
+func (m *Merger) buildMergedRecord(network *net.IPNet, geoRecord *reader.GeoLite2CityRecord, record *MergedRecord) {
 	if geoRecord.HasGeoData() {
-		atomic.AddInt64(&m.stats.GeoLiteCityHits, 1)
+		m.stats.GeoLiteCityHits++
 
+		// Source maps from maxminddb are read-only, safe to reference directly
 		record.City = CityRecord{
 			GeonameID: geoRecord.City.GeonameID,
-			Names:     copyMap(geoRecord.City.Names),
+			Names:     geoRecord.City.Names,
 		}
 
 		record.Continent = ContinentRecord{
 			Code:      geoRecord.Continent.Code,
 			GeonameID: geoRecord.Continent.GeonameID,
-			Names:     copyMap(geoRecord.Continent.Names),
+			Names:     geoRecord.Continent.Names,
 		}
 
 		record.Country = CountryRecord{
 			GeonameID: geoRecord.Country.GeonameID,
 			ISOCode:   geoRecord.Country.ISOCode,
-			Names:     copyMap(geoRecord.Country.Names),
+			Names:     geoRecord.Country.Names,
 		}
 
 		record.Location = LocationRecord{
@@ -293,6 +315,7 @@ func (m *Merger) buildMergedRecord(network *net.IPNet, geoRecord *reader.GeoLite
 			Longitude:      geoRecord.Location.Longitude,
 			MetroCode:      geoRecord.Location.MetroCode,
 			TimeZone:       geoRecord.Location.TimeZone,
+			HasCoordinates: geoRecord.HasLocationData(),
 		}
 
 		record.Postal = PostalRecord{
@@ -302,7 +325,7 @@ func (m *Merger) buildMergedRecord(network *net.IPNet, geoRecord *reader.GeoLite
 		record.RegisteredCountry = CountryRecord{
 			GeonameID: geoRecord.RegisteredCountry.GeonameID,
 			ISOCode:   geoRecord.RegisteredCountry.ISOCode,
-			Names:     copyMap(geoRecord.RegisteredCountry.Names),
+			Names:     geoRecord.RegisteredCountry.Names,
 		}
 
 		if len(geoRecord.Subdivisions) > 0 {
@@ -311,7 +334,7 @@ func (m *Merger) buildMergedRecord(network *net.IPNet, geoRecord *reader.GeoLite
 				record.Subdivisions[i] = SubdivisionRecord{
 					GeonameID: sub.GeonameID,
 					ISOCode:   sub.ISOCode,
-					Names:     copyMap(sub.Names),
+					Names:     sub.Names,
 				}
 			}
 		}
@@ -319,14 +342,11 @@ func (m *Merger) buildMergedRecord(network *net.IPNet, geoRecord *reader.GeoLite
 
 	m.enrichWithASNData(network.IP, record)
 	m.enrichWithCountryFallback(network.IP, record)
-
-	return record
 }
 
-// buildMergedRecordFromDBIP creates a merged record using DB-IP as primary geo source
-func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reader.DBIPCityRecord) *MergedRecord {
-	record := &MergedRecord{}
-
+// buildMergedRecordFromDBIP creates a merged record using DB-IP as primary geo source.
+// The record parameter should be pre-reset before calling this function.
+func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reader.DBIPCityRecord, record *MergedRecord) {
 	if dbipRecord.HasGeoData() {
 		record.City = CityRecord{
 			Names: map[string]string{"en": dbipRecord.City},
@@ -338,9 +358,10 @@ func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reade
 
 		if dbipRecord.HasLocationData() {
 			record.Location = LocationRecord{
-				Latitude:  float64(dbipRecord.Latitude),
-				Longitude: float64(dbipRecord.Longitude),
-				TimeZone:  dbipRecord.Timezone,
+				Latitude:       float64(dbipRecord.Latitude),
+				Longitude:      float64(dbipRecord.Longitude),
+				TimeZone:       dbipRecord.Timezone,
+				HasCoordinates: true,
 			}
 		}
 
@@ -361,8 +382,6 @@ func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reade
 
 	m.enrichWithASNData(network.IP, record)
 	m.enrichWithCountryFallback(network.IP, record)
-
-	return record
 }
 
 // enrichWithCountryFallback adds country information from GeoWhois when country is missing
@@ -373,7 +392,7 @@ func (m *Merger) enrichWithCountryFallback(ip net.IP, record *MergedRecord) {
 
 	geoWhoisRecord, err := m.geoWhoisCountry.Lookup(ip)
 	if err == nil && geoWhoisRecord.HasCountry() {
-		atomic.AddInt64(&m.stats.GeoWhoisCountryHits, 1)
+		m.stats.GeoWhoisCountryHits++
 		record.Country.ISOCode = geoWhoisRecord.CountryCode
 	}
 }
@@ -383,7 +402,7 @@ func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 	// Priority 1: IPinfo Lite (includes as_domain)
 	ipinfoRecord, err := m.ipinfoLite.Lookup(ip)
 	if err == nil && ipinfoRecord.HasASN() {
-		atomic.AddInt64(&m.stats.IPinfoLiteHits, 1)
+		m.stats.IPinfoLiteHits++
 		record.ASN = ASNRecord{
 			Number:       ipinfoRecord.GetASNumber(),
 			Organization: ipinfoRecord.ASName,
@@ -395,7 +414,7 @@ func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 	// Priority 2: GeoLite2-ASN
 	asnRecord, err := m.geoLiteASN.Lookup(ip)
 	if err == nil && asnRecord.HasASN() {
-		atomic.AddInt64(&m.stats.GeoLiteASNHits, 1)
+		m.stats.GeoLiteASNHits++
 		record.ASN = ASNRecord{
 			Number:       asnRecord.AutonomousSystemNumber,
 			Organization: asnRecord.AutonomousSystemOrganization,
@@ -406,7 +425,7 @@ func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 	// Priority 3: RouteViews ASN
 	routeViewsRecord, err := m.routeViewsASN.Lookup(ip)
 	if err == nil && routeViewsRecord.HasASN() {
-		atomic.AddInt64(&m.stats.RouteViewsASNHits, 1)
+		m.stats.RouteViewsASNHits++
 		record.ASN = ASNRecord{
 			Number:       routeViewsRecord.AutonomousSystemNumber,
 			Organization: routeViewsRecord.AutonomousSystemOrganization,
@@ -469,16 +488,4 @@ func (m *Merger) printStats() {
 	fmt.Printf("  GeoWhois Country fallback hits: %d\n", m.stats.GeoWhoisCountryHits)
 	fmt.Printf("  Empty records skipped: %d\n", m.stats.EmptyRecords)
 	fmt.Printf("  Final network count: %d\n", m.stats.ProcessedNetworks)
-}
-
-// copyMap creates a deep copy of a string map
-func copyMap(m map[string]string) map[string]string {
-	if m == nil {
-		return nil
-	}
-	result := make(map[string]string, len(m))
-	for k, v := range m {
-		result[k] = v
-	}
-	return result
 }

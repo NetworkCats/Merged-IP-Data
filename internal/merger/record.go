@@ -44,6 +44,7 @@ type LocationRecord struct {
 	Longitude      float64 `maxminddb:"longitude"`
 	MetroCode      uint16  `maxminddb:"metro_code"`
 	TimeZone       string  `maxminddb:"time_zone"`
+	HasCoordinates bool    // Tracks if coordinates were explicitly set (fixes 0,0 being valid)
 }
 
 // PostalRecord contains postal code information
@@ -68,7 +69,7 @@ type ASNRecord struct {
 // ToMMDBType converts the MergedRecord to mmdbtype.Map for insertion into the database.
 // Only non-empty fields are included to minimize database size.
 func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
-	result := mmdbtype.Map{}
+	result := make(mmdbtype.Map, 8)
 
 	if city := r.City.toMMDBType(); len(city) > 0 {
 		result["city"] = city
@@ -106,14 +107,14 @@ func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
 }
 
 func (c *CityRecord) toMMDBType() mmdbtype.Map {
-	result := mmdbtype.Map{}
+	result := make(mmdbtype.Map, 2)
 
 	if c.GeonameID != 0 {
 		result["geoname_id"] = mmdbtype.Uint32(c.GeonameID)
 	}
 
 	if len(c.Names) > 0 {
-		names := mmdbtype.Map{}
+		names := make(mmdbtype.Map, len(c.Names))
 		for lang, name := range c.Names {
 			names[mmdbtype.String(lang)] = mmdbtype.String(name)
 		}
@@ -124,7 +125,7 @@ func (c *CityRecord) toMMDBType() mmdbtype.Map {
 }
 
 func (c *ContinentRecord) toMMDBType() mmdbtype.Map {
-	result := mmdbtype.Map{}
+	result := make(mmdbtype.Map, 3)
 
 	if c.Code != "" {
 		result["code"] = mmdbtype.String(c.Code)
@@ -135,7 +136,7 @@ func (c *ContinentRecord) toMMDBType() mmdbtype.Map {
 	}
 
 	if len(c.Names) > 0 {
-		names := mmdbtype.Map{}
+		names := make(mmdbtype.Map, len(c.Names))
 		for lang, name := range c.Names {
 			names[mmdbtype.String(lang)] = mmdbtype.String(name)
 		}
@@ -146,7 +147,7 @@ func (c *ContinentRecord) toMMDBType() mmdbtype.Map {
 }
 
 func (c *CountryRecord) toMMDBType() mmdbtype.Map {
-	result := mmdbtype.Map{}
+	result := make(mmdbtype.Map, 3)
 
 	if c.GeonameID != 0 {
 		result["geoname_id"] = mmdbtype.Uint32(c.GeonameID)
@@ -157,7 +158,7 @@ func (c *CountryRecord) toMMDBType() mmdbtype.Map {
 	}
 
 	if len(c.Names) > 0 {
-		names := mmdbtype.Map{}
+		names := make(mmdbtype.Map, len(c.Names))
 		for lang, name := range c.Names {
 			names[mmdbtype.String(lang)] = mmdbtype.String(name)
 		}
@@ -168,17 +169,15 @@ func (c *CountryRecord) toMMDBType() mmdbtype.Map {
 }
 
 func (l *LocationRecord) toMMDBType() mmdbtype.Map {
-	result := mmdbtype.Map{}
+	result := make(mmdbtype.Map, 5)
 
 	if l.AccuracyRadius != 0 {
 		result["accuracy_radius"] = mmdbtype.Uint16(l.AccuracyRadius)
 	}
 
-	if l.Latitude != 0 {
+	// Use HasCoordinates flag to correctly handle (0,0) as a valid location
+	if l.HasCoordinates {
 		result["latitude"] = mmdbtype.Float64(l.Latitude)
-	}
-
-	if l.Longitude != 0 {
 		result["longitude"] = mmdbtype.Float64(l.Longitude)
 	}
 
@@ -194,7 +193,7 @@ func (l *LocationRecord) toMMDBType() mmdbtype.Map {
 }
 
 func (p *PostalRecord) toMMDBType() mmdbtype.Map {
-	result := mmdbtype.Map{}
+	result := make(mmdbtype.Map, 1)
 
 	if p.Code != "" {
 		result["code"] = mmdbtype.String(p.Code)
@@ -204,7 +203,7 @@ func (p *PostalRecord) toMMDBType() mmdbtype.Map {
 }
 
 func (s *SubdivisionRecord) toMMDBType() mmdbtype.Map {
-	result := mmdbtype.Map{}
+	result := make(mmdbtype.Map, 3)
 
 	if s.GeonameID != 0 {
 		result["geoname_id"] = mmdbtype.Uint32(s.GeonameID)
@@ -215,7 +214,7 @@ func (s *SubdivisionRecord) toMMDBType() mmdbtype.Map {
 	}
 
 	if len(s.Names) > 0 {
-		names := mmdbtype.Map{}
+		names := make(mmdbtype.Map, len(s.Names))
 		for lang, name := range s.Names {
 			names[mmdbtype.String(lang)] = mmdbtype.String(name)
 		}
@@ -241,7 +240,7 @@ func (r *MergedRecord) subdivisionsToMMDBType() mmdbtype.Slice {
 }
 
 func (a *ASNRecord) toMMDBType() mmdbtype.Map {
-	result := mmdbtype.Map{}
+	result := make(mmdbtype.Map, 3)
 
 	if a.Number != 0 {
 		result["autonomous_system_number"] = mmdbtype.Uint32(a.Number)
@@ -264,8 +263,19 @@ func (r *MergedRecord) IsEmpty() bool {
 		r.City.GeonameID == 0 &&
 		len(r.City.Names) == 0 &&
 		r.ASN.Number == 0 &&
-		r.Location.Latitude == 0 &&
-		r.Location.Longitude == 0
+		!r.Location.HasCoordinates
+}
+
+// Reset clears all fields for reuse, reducing allocations
+func (r *MergedRecord) Reset() {
+	r.City = CityRecord{}
+	r.Continent = ContinentRecord{}
+	r.Country = CountryRecord{}
+	r.Location = LocationRecord{}
+	r.Postal = PostalRecord{}
+	r.RegisteredCountry = CountryRecord{}
+	r.Subdivisions = nil
+	r.ASN = ASNRecord{}
 }
 
 // HasGeoData checks if the record has geographic data
@@ -280,5 +290,5 @@ func (r *MergedRecord) HasASNData() bool {
 
 // HasLocationData checks if the record has coordinate data
 func (r *MergedRecord) HasLocationData() bool {
-	return r.Location.Latitude != 0 || r.Location.Longitude != 0
+	return r.Location.HasCoordinates
 }
