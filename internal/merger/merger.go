@@ -67,6 +67,11 @@ type Merger struct {
 	reusableQQWryRecord       reader.QQWryRecord
 	reusableGeoLiteCityRecord reader.GeoLite2CityRecord
 	reusableOpenproxyDBRecord reader.OpenproxyDBRecord
+
+	// ASN lookup cache to avoid redundant lookups for adjacent networks
+	cachedASN        ASNRecord
+	cachedASNNetwork *net.IPNet
+	cachedASNValid   bool
 }
 
 // Stats holds merge statistics
@@ -534,40 +539,77 @@ func (m *Merger) enrichWithQQWryData(ip net.IP, record *MergedRecord) {
 	}
 }
 
-// enrichWithASNData adds ASN information from IPinfo Lite (primary), GeoLite2-ASN (secondary), or RouteViews (tertiary)
+// enrichWithASNData adds ASN information from IPinfo Lite (primary), GeoLite2-ASN (secondary), or RouteViews (tertiary).
+// Uses caching to avoid redundant lookups for IPs within the same ASN network.
 func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
-	// Priority 1: IPinfo Lite (includes as_domain)
-	m.reusableIPinfoRecord.Reset()
-	if err := m.ipinfoLite.LookupTo(ip, &m.reusableIPinfoRecord); err == nil && m.reusableIPinfoRecord.HasASN() {
-		m.stats.IPinfoLiteHits++
-		record.ASN = ASNRecord{
-			Number:       m.reusableIPinfoRecord.GetASNumber(),
-			Organization: m.reusableIPinfoRecord.ASName,
-			Domain:       m.reusableIPinfoRecord.ASDomain,
+	// Check cache first - if IP is within cached ASN network, reuse the result
+	if m.cachedASNValid && m.cachedASNNetwork != nil && m.cachedASNNetwork.Contains(ip) {
+		if m.cachedASN.Number != 0 {
+			record.ASN = m.cachedASN
 		}
 		return
+	}
+
+	// Cache miss - perform lookups
+	m.cachedASNValid = false
+	m.cachedASNNetwork = nil
+
+	// Priority 1: IPinfo Lite (includes as_domain)
+	m.reusableIPinfoRecord.Reset()
+	if network, _, lookupOK, err := m.ipinfoLite.LookupNetwork(ip); err == nil && lookupOK && m.reusableIPinfoRecord.HasASN() {
+		// Need to do a separate lookup to get the record data since LookupNetwork returns record
+		if err := m.ipinfoLite.LookupTo(ip, &m.reusableIPinfoRecord); err == nil && m.reusableIPinfoRecord.HasASN() {
+			m.stats.IPinfoLiteHits++
+			record.ASN = ASNRecord{
+				Number:       m.reusableIPinfoRecord.GetASNumber(),
+				Organization: m.reusableIPinfoRecord.ASName,
+				Domain:       m.reusableIPinfoRecord.ASDomain,
+			}
+			// Cache the result
+			m.cachedASN = record.ASN
+			m.cachedASNNetwork = network
+			m.cachedASNValid = true
+			return
+		}
 	}
 
 	// Priority 2: GeoLite2-ASN
 	m.reusableGeoLiteASNRecord.Reset()
-	if err := m.geoLiteASN.LookupTo(ip, &m.reusableGeoLiteASNRecord); err == nil && m.reusableGeoLiteASNRecord.HasASN() {
-		m.stats.GeoLiteASNHits++
-		record.ASN = ASNRecord{
-			Number:       m.reusableGeoLiteASNRecord.AutonomousSystemNumber,
-			Organization: m.reusableGeoLiteASNRecord.AutonomousSystemOrganization,
+	if network, _, lookupOK, err := m.geoLiteASN.LookupNetwork(ip); err == nil && lookupOK {
+		if err := m.geoLiteASN.LookupTo(ip, &m.reusableGeoLiteASNRecord); err == nil && m.reusableGeoLiteASNRecord.HasASN() {
+			m.stats.GeoLiteASNHits++
+			record.ASN = ASNRecord{
+				Number:       m.reusableGeoLiteASNRecord.AutonomousSystemNumber,
+				Organization: m.reusableGeoLiteASNRecord.AutonomousSystemOrganization,
+			}
+			// Cache the result
+			m.cachedASN = record.ASN
+			m.cachedASNNetwork = network
+			m.cachedASNValid = true
+			return
 		}
-		return
 	}
 
 	// Priority 3: RouteViews ASN
 	m.reusableRouteViewsRecord.Reset()
-	if err := m.routeViewsASN.LookupTo(ip, &m.reusableRouteViewsRecord); err == nil && m.reusableRouteViewsRecord.HasASN() {
-		m.stats.RouteViewsASNHits++
-		record.ASN = ASNRecord{
-			Number:       m.reusableRouteViewsRecord.AutonomousSystemNumber,
-			Organization: m.reusableRouteViewsRecord.AutonomousSystemOrganization,
+	if network, _, lookupOK, err := m.routeViewsASN.LookupNetwork(ip); err == nil && lookupOK {
+		if err := m.routeViewsASN.LookupTo(ip, &m.reusableRouteViewsRecord); err == nil && m.reusableRouteViewsRecord.HasASN() {
+			m.stats.RouteViewsASNHits++
+			record.ASN = ASNRecord{
+				Number:       m.reusableRouteViewsRecord.AutonomousSystemNumber,
+				Organization: m.reusableRouteViewsRecord.AutonomousSystemOrganization,
+			}
+			// Cache the result
+			m.cachedASN = record.ASN
+			m.cachedASNNetwork = network
+			m.cachedASNValid = true
+			return
 		}
 	}
+
+	// No ASN found - cache the miss with empty record
+	m.cachedASN = ASNRecord{}
+	m.cachedASNValid = true
 }
 
 // enrichWithProxyData adds proxy/anonymity information from OpenProxyDB

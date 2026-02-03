@@ -1,10 +1,63 @@
 package merger
 
 import (
+	"sync"
+
 	"merged-ip-data/internal/interner"
 
 	"github.com/maxmind/mmdbwriter/mmdbtype"
 )
+
+// Map pools for different sizes to reduce allocations.
+// mmdbtype.Map is allocated frequently during record conversion,
+// and pooling significantly reduces GC pressure.
+var (
+	mapPool1 = sync.Pool{New: func() interface{} { return make(mmdbtype.Map, 1) }}
+	mapPool2 = sync.Pool{New: func() interface{} { return make(mmdbtype.Map, 2) }}
+	mapPool3 = sync.Pool{New: func() interface{} { return make(mmdbtype.Map, 3) }}
+	mapPool4 = sync.Pool{New: func() interface{} { return make(mmdbtype.Map, 4) }}
+	mapPool5 = sync.Pool{New: func() interface{} { return make(mmdbtype.Map, 5) }}
+	mapPool9 = sync.Pool{New: func() interface{} { return make(mmdbtype.Map, 9) }}
+)
+
+// getMapFromPool retrieves a map from the appropriate pool based on size
+func getMapFromPool(size int) mmdbtype.Map {
+	switch size {
+	case 1:
+		m := mapPool1.Get().(mmdbtype.Map)
+		clearMap(m)
+		return m
+	case 2:
+		m := mapPool2.Get().(mmdbtype.Map)
+		clearMap(m)
+		return m
+	case 3:
+		m := mapPool3.Get().(mmdbtype.Map)
+		clearMap(m)
+		return m
+	case 4:
+		m := mapPool4.Get().(mmdbtype.Map)
+		clearMap(m)
+		return m
+	case 5:
+		m := mapPool5.Get().(mmdbtype.Map)
+		clearMap(m)
+		return m
+	case 9:
+		m := mapPool9.Get().(mmdbtype.Map)
+		clearMap(m)
+		return m
+	default:
+		return make(mmdbtype.Map, size)
+	}
+}
+
+// clearMap removes all entries from a map for reuse
+func clearMap(m mmdbtype.Map) {
+	for k := range m {
+		delete(m, k)
+	}
+}
 
 // Pre-defined mmdbtype.String keys to avoid repeated allocations.
 // These are used as map keys in ToMMDBType() methods.
@@ -161,7 +214,7 @@ func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
 		return nil
 	}
 
-	result := make(mmdbtype.Map, count)
+	result := getMapFromPool(count)
 
 	if city != nil {
 		result[keyCity] = city
@@ -207,14 +260,14 @@ func (c *CityRecord) toMMDBType() mmdbtype.Map {
 		return nil
 	}
 
-	result := make(mmdbtype.Map, count)
+	result := getMapFromPool(count)
 
 	if c.GeonameID != 0 {
 		result[keyGeonameID] = mmdbtype.Uint32(c.GeonameID)
 	}
 
 	if len(c.Names) > 0 {
-		names := make(mmdbtype.Map, len(c.Names))
+		names := getMapFromPool(len(c.Names))
 		for lang, name := range c.Names {
 			names[mmdbtype.String(interner.Intern(lang))] = mmdbtype.String(interner.Intern(name))
 		}
@@ -240,7 +293,7 @@ func (c *ContinentRecord) toMMDBType() mmdbtype.Map {
 		return nil
 	}
 
-	result := make(mmdbtype.Map, count)
+	result := getMapFromPool(count)
 
 	if c.Code != "" {
 		result[keyCode] = mmdbtype.String(interner.Intern(c.Code))
@@ -251,7 +304,7 @@ func (c *ContinentRecord) toMMDBType() mmdbtype.Map {
 	}
 
 	if len(c.Names) > 0 {
-		names := make(mmdbtype.Map, len(c.Names))
+		names := getMapFromPool(len(c.Names))
 		for lang, name := range c.Names {
 			names[mmdbtype.String(interner.Intern(lang))] = mmdbtype.String(interner.Intern(name))
 		}
@@ -277,7 +330,7 @@ func (c *CountryRecord) toMMDBType() mmdbtype.Map {
 		return nil
 	}
 
-	result := make(mmdbtype.Map, count)
+	result := getMapFromPool(count)
 
 	if c.GeonameID != 0 {
 		result[keyGeonameID] = mmdbtype.Uint32(c.GeonameID)
@@ -288,7 +341,7 @@ func (c *CountryRecord) toMMDBType() mmdbtype.Map {
 	}
 
 	if len(c.Names) > 0 {
-		names := make(mmdbtype.Map, len(c.Names))
+		names := getMapFromPool(len(c.Names))
 		for lang, name := range c.Names {
 			names[mmdbtype.String(interner.Intern(lang))] = mmdbtype.String(interner.Intern(name))
 		}
@@ -317,7 +370,7 @@ func (l *LocationRecord) toMMDBType() mmdbtype.Map {
 		return nil
 	}
 
-	result := make(mmdbtype.Map, count)
+	result := getMapFromPool(count)
 
 	if l.AccuracyRadius != 0 {
 		result[keyAccuracyRadius] = mmdbtype.Uint16(l.AccuracyRadius)
@@ -345,7 +398,7 @@ func (p *PostalRecord) toMMDBType() mmdbtype.Map {
 		return nil
 	}
 
-	result := make(mmdbtype.Map, 1)
+	result := getMapFromPool(1)
 	result[keyCode] = mmdbtype.String(p.Code)
 	return result
 }
@@ -366,7 +419,7 @@ func (s *SubdivisionRecord) toMMDBType() mmdbtype.Map {
 		return nil
 	}
 
-	result := make(mmdbtype.Map, count)
+	result := getMapFromPool(count)
 
 	if s.GeonameID != 0 {
 		result[keyGeonameID] = mmdbtype.Uint32(s.GeonameID)
@@ -377,7 +430,7 @@ func (s *SubdivisionRecord) toMMDBType() mmdbtype.Map {
 	}
 
 	if len(s.Names) > 0 {
-		names := make(mmdbtype.Map, len(s.Names))
+		names := getMapFromPool(len(s.Names))
 		for lang, name := range s.Names {
 			names[mmdbtype.String(interner.Intern(lang))] = mmdbtype.String(interner.Intern(name))
 		}
@@ -421,7 +474,7 @@ func (a *ASNRecord) toMMDBType() mmdbtype.Map {
 		return nil
 	}
 
-	result := make(mmdbtype.Map, count)
+	result := getMapFromPool(count)
 
 	if a.Number != 0 {
 		result[keyASNumber] = mmdbtype.Uint32(a.Number)
@@ -466,7 +519,7 @@ func (p *ProxyRecord) toMMDBType() mmdbtype.Map {
 		return nil
 	}
 
-	result := make(mmdbtype.Map, count)
+	result := getMapFromPool(count)
 
 	if p.IsProxy {
 		result[keyIsProxy] = mmdbtype.Bool(true)
