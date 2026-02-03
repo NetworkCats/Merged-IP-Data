@@ -43,6 +43,11 @@ func (r *IPinfoLiteReader) Lookup(ip net.IP) (*IPinfoLiteRecord, error) {
 	return &record, nil
 }
 
+// LookupTo looks up an IP address into a pre-allocated record to reduce allocations
+func (r *IPinfoLiteReader) LookupTo(ip net.IP, record *IPinfoLiteRecord) error {
+	return r.Reader.Lookup(ip, record)
+}
+
 // LookupNetwork looks up an IP and returns the network and record
 func (r *IPinfoLiteReader) LookupNetwork(ip net.IP) (*net.IPNet, *IPinfoLiteRecord, bool, error) {
 	var record IPinfoLiteRecord

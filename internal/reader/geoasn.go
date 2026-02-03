@@ -36,6 +36,11 @@ func (r *GeoLite2ASNReader) Lookup(ip net.IP) (*GeoLite2ASNRecord, error) {
 	return &record, nil
 }
 
+// LookupTo looks up an IP address into a pre-allocated record to reduce allocations
+func (r *GeoLite2ASNReader) LookupTo(ip net.IP, record *GeoLite2ASNRecord) error {
+	return r.Reader.Lookup(ip, record)
+}
+
 // LookupNetwork looks up an IP and returns the network and record
 func (r *GeoLite2ASNReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoLite2ASNRecord, bool, error) {
 	var record GeoLite2ASNRecord

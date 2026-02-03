@@ -69,37 +69,71 @@ type ASNRecord struct {
 // ToMMDBType converts the MergedRecord to mmdbtype.Map for insertion into the database.
 // Only non-empty fields are included to minimize database size.
 func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
-	result := make(mmdbtype.Map, 8)
+	// Convert all sub-records first
+	city := r.City.toMMDBType()
+	continent := r.Continent.toMMDBType()
+	country := r.Country.toMMDBType()
+	location := r.Location.toMMDBType()
+	postal := r.Postal.toMMDBType()
+	regCountry := r.RegisteredCountry.toMMDBType()
+	subdivisions := r.subdivisionsToMMDBType()
+	asn := r.ASN.toMMDBType()
 
-	if city := r.City.toMMDBType(); len(city) > 0 {
+	// Count non-nil fields to allocate exact capacity
+	count := 0
+	if city != nil {
+		count++
+	}
+	if continent != nil {
+		count++
+	}
+	if country != nil {
+		count++
+	}
+	if location != nil {
+		count++
+	}
+	if postal != nil {
+		count++
+	}
+	if regCountry != nil {
+		count++
+	}
+	if subdivisions != nil {
+		count++
+	}
+	if asn != nil {
+		count++
+	}
+
+	if count == 0 {
+		return nil
+	}
+
+	result := make(mmdbtype.Map, count)
+
+	if city != nil {
 		result["city"] = city
 	}
-
-	if continent := r.Continent.toMMDBType(); len(continent) > 0 {
+	if continent != nil {
 		result["continent"] = continent
 	}
-
-	if country := r.Country.toMMDBType(); len(country) > 0 {
+	if country != nil {
 		result["country"] = country
 	}
-
-	if location := r.Location.toMMDBType(); len(location) > 0 {
+	if location != nil {
 		result["location"] = location
 	}
-
-	if postal := r.Postal.toMMDBType(); len(postal) > 0 {
+	if postal != nil {
 		result["postal"] = postal
 	}
-
-	if regCountry := r.RegisteredCountry.toMMDBType(); len(regCountry) > 0 {
+	if regCountry != nil {
 		result["registered_country"] = regCountry
 	}
-
-	if subdivisions := r.subdivisionsToMMDBType(); len(subdivisions) > 0 {
+	if subdivisions != nil {
 		result["subdivisions"] = subdivisions
 	}
-
-	if asn := r.ASN.toMMDBType(); len(asn) > 0 {
+	if asn != nil {
 		result["asn"] = asn
 	}
 
@@ -107,7 +141,19 @@ func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
 }
 
 func (c *CityRecord) toMMDBType() mmdbtype.Map {
-	result := make(mmdbtype.Map, 2)
+	// Count non-empty fields first to avoid over-allocation
+	count := 0
+	if c.GeonameID != 0 {
+		count++
+	}
+	if len(c.Names) > 0 {
+		count++
+	}
+	if count == 0 {
+		return nil
+	}
+
+	result := make(mmdbtype.Map, count)
 
 	if c.GeonameID != 0 {
 		result["geoname_id"] = mmdbtype.Uint32(c.GeonameID)
@@ -125,7 +171,22 @@ func (c *CityRecord) toMMDBType() mmdbtype.Map {
 }
 
 func (c *ContinentRecord) toMMDBType() mmdbtype.Map {
-	result := make(mmdbtype.Map, 3)
+	// Count non-empty fields first to avoid over-allocation
+	count := 0
+	if c.Code != "" {
+		count++
+	}
+	if c.GeonameID != 0 {
+		count++
+	}
+	if len(c.Names) > 0 {
+		count++
+	}
+	if count == 0 {
+		return nil
+	}
+
+	result := make(mmdbtype.Map, count)
 
 	if c.Code != "" {
 		result["code"] = mmdbtype.String(c.Code)
@@ -147,7 +208,22 @@ func (c *ContinentRecord) toMMDBType() mmdbtype.Map {
 }
 
 func (c *CountryRecord) toMMDBType() mmdbtype.Map {
-	result := make(mmdbtype.Map, 3)
+	// Count non-empty fields first to avoid over-allocation
+	count := 0
+	if c.GeonameID != 0 {
+		count++
+	}
+	if c.ISOCode != "" {
+		count++
+	}
+	if len(c.Names) > 0 {
+		count++
+	}
+	if count == 0 {
+		return nil
+	}
+
+	result := make(mmdbtype.Map, count)
 
 	if c.GeonameID != 0 {
 		result["geoname_id"] = mmdbtype.Uint32(c.GeonameID)
@@ -169,7 +245,25 @@ func (c *CountryRecord) toMMDBType() mmdbtype.Map {
 }
 
 func (l *LocationRecord) toMMDBType() mmdbtype.Map {
-	result := make(mmdbtype.Map, 5)
+	// Count non-empty fields first to avoid over-allocation
+	count := 0
+	if l.AccuracyRadius != 0 {
+		count++
+	}
+	if l.HasCoordinates {
+		count += 2 // latitude and longitude
+	}
+	if l.MetroCode != 0 {
+		count++
+	}
+	if l.TimeZone != "" {
+		count++
+	}
+	if count == 0 {
+		return nil
+	}
+
+	result := make(mmdbtype.Map, count)
 
 	if l.AccuracyRadius != 0 {
 		result["accuracy_radius"] = mmdbtype.Uint16(l.AccuracyRadius)
@@ -193,17 +287,32 @@ func (l *LocationRecord) toMMDBType() mmdbtype.Map {
 }
 
 func (p *PostalRecord) toMMDBType() mmdbtype.Map {
-	result := make(mmdbtype.Map, 1)
-
-	if p.Code != "" {
-		result["code"] = mmdbtype.String(p.Code)
+	if p.Code == "" {
+		return nil
 	}
 
+	result := make(mmdbtype.Map, 1)
+	result["code"] = mmdbtype.String(p.Code)
 	return result
 }
 
 func (s *SubdivisionRecord) toMMDBType() mmdbtype.Map {
-	result := make(mmdbtype.Map, 3)
+	// Count non-empty fields first to avoid over-allocation
+	count := 0
+	if s.GeonameID != 0 {
+		count++
+	}
+	if s.ISOCode != "" {
+		count++
+	}
+	if len(s.Names) > 0 {
+		count++
+	}
+	if count == 0 {
+		return nil
+	}
+
+	result := make(mmdbtype.Map, count)
 
 	if s.GeonameID != 0 {
 		result["geoname_id"] = mmdbtype.Uint32(s.GeonameID)
@@ -240,7 +349,22 @@ func (r *MergedRecord) subdivisionsToMMDBType() mmdbtype.Slice {
 }
 
 func (a *ASNRecord) toMMDBType() mmdbtype.Map {
-	result := make(mmdbtype.Map, 3)
+	// Count non-empty fields first to avoid over-allocation
+	count := 0
+	if a.Number != 0 {
+		count++
+	}
+	if a.Organization != "" {
+		count++
+	}
+	if a.Domain != "" {
+		count++
+	}
+	if count == 0 {
+		return nil
+	}
+
+	result := make(mmdbtype.Map, count)
 
 	if a.Number != 0 {
 		result["autonomous_system_number"] = mmdbtype.Uint32(a.Number)

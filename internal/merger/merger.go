@@ -42,6 +42,14 @@ type Merger struct {
 	tree *mmdbwriter.Tree
 
 	stats Stats
+
+	// Reusable records for lookups to reduce allocations during merge
+	reusableIPinfoRecord      reader.IPinfoLiteRecord
+	reusableGeoLiteASNRecord  reader.GeoLite2ASNRecord
+	reusableRouteViewsRecord  reader.RouteViewsASNRecord
+	reusableGeoWhoisRecord    reader.GeoWhoisCountryRecord
+	reusableQQWryRecord       reader.QQWryRecord
+	reusableGeoLiteCityRecord reader.GeoLite2CityRecord
 }
 
 // Stats holds merge statistics
@@ -272,9 +280,9 @@ func (m *Merger) processDBIPReader(r *reader.Reader) error {
 		}
 
 		ip := network.IP
-		geoRecord, _ := m.geoLiteCity.Lookup(ip)
 
-		if geoRecord != nil && geoRecord.HasGeoData() {
+		// Use reusable record to check if GeoLite2 has data for this IP
+		if err := m.geoLiteCity.LookupTo(ip, &m.reusableGeoLiteCityRecord); err == nil && m.reusableGeoLiteCityRecord.HasGeoData() {
 			continue
 		}
 
@@ -407,10 +415,9 @@ func (m *Merger) enrichWithCountryFallback(ip net.IP, record *MergedRecord) {
 		return
 	}
 
-	geoWhoisRecord, err := m.geoWhoisCountry.Lookup(ip)
-	if err == nil && geoWhoisRecord.HasCountry() {
+	if err := m.geoWhoisCountry.LookupTo(ip, &m.reusableGeoWhoisRecord); err == nil && m.reusableGeoWhoisRecord.HasCountry() {
 		m.stats.GeoWhoisCountryHits++
-		record.Country.ISOCode = geoWhoisRecord.CountryCode
+		record.Country.ISOCode = m.reusableGeoWhoisRecord.CountryCode
 	}
 }
 
@@ -422,37 +429,36 @@ func (m *Merger) enrichWithQQWryData(ip net.IP, record *MergedRecord) {
 		return
 	}
 
-	qqwryRecord, err := m.qqwry.Lookup(ip)
-	if err != nil || !qqwryRecord.HasGeoData() {
+	if err := m.qqwry.LookupTo(ip, &m.reusableQQWryRecord); err != nil || !m.reusableQQWryRecord.HasGeoData() {
 		return
 	}
 
 	// Verify the record is indeed for China
-	if !qqwryRecord.IsChina() {
+	if !m.reusableQQWryRecord.IsChina() {
 		return
 	}
 
 	m.stats.QQWryHits++
 
 	// Enrich city names with Chinese (zh-CN)
-	if qqwryRecord.HasCityData() {
+	if m.reusableQQWryRecord.HasCityData() {
 		if record.City.Names == nil {
 			record.City.Names = make(map[string]string)
 		}
-		record.City.Names["zh-CN"] = qqwryRecord.CityName
+		record.City.Names["zh-CN"] = m.reusableQQWryRecord.CityName
 	}
 
 	// Enrich subdivision (province) names with Chinese (zh-CN)
-	if qqwryRecord.HasRegionData() {
+	if m.reusableQQWryRecord.HasRegionData() {
 		if len(record.Subdivisions) == 0 {
 			record.Subdivisions = []SubdivisionRecord{{
-				Names: map[string]string{"zh-CN": qqwryRecord.RegionName},
+				Names: map[string]string{"zh-CN": m.reusableQQWryRecord.RegionName},
 			}}
 		} else {
 			if record.Subdivisions[0].Names == nil {
 				record.Subdivisions[0].Names = make(map[string]string)
 			}
-			record.Subdivisions[0].Names["zh-CN"] = qqwryRecord.RegionName
+			record.Subdivisions[0].Names["zh-CN"] = m.reusableQQWryRecord.RegionName
 		}
 	}
 
@@ -461,42 +467,39 @@ func (m *Merger) enrichWithQQWryData(ip net.IP, record *MergedRecord) {
 		record.Country.Names = make(map[string]string)
 	}
 	if _, ok := record.Country.Names["zh-CN"]; !ok {
-		record.Country.Names["zh-CN"] = qqwryRecord.CountryName
+		record.Country.Names["zh-CN"] = m.reusableQQWryRecord.CountryName
 	}
 }
 
 // enrichWithASNData adds ASN information from IPinfo Lite (primary), GeoLite2-ASN (secondary), or RouteViews (tertiary)
 func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 	// Priority 1: IPinfo Lite (includes as_domain)
-	ipinfoRecord, err := m.ipinfoLite.Lookup(ip)
-	if err == nil && ipinfoRecord.HasASN() {
+	if err := m.ipinfoLite.LookupTo(ip, &m.reusableIPinfoRecord); err == nil && m.reusableIPinfoRecord.HasASN() {
 		m.stats.IPinfoLiteHits++
 		record.ASN = ASNRecord{
-			Number:       ipinfoRecord.GetASNumber(),
-			Organization: ipinfoRecord.ASName,
-			Domain:       ipinfoRecord.ASDomain,
+			Number:       m.reusableIPinfoRecord.GetASNumber(),
+			Organization: m.reusableIPinfoRecord.ASName,
+			Domain:       m.reusableIPinfoRecord.ASDomain,
 		}
 		return
 	}
 
 	// Priority 2: GeoLite2-ASN
-	asnRecord, err := m.geoLiteASN.Lookup(ip)
-	if err == nil && asnRecord.HasASN() {
+	if err := m.geoLiteASN.LookupTo(ip, &m.reusableGeoLiteASNRecord); err == nil && m.reusableGeoLiteASNRecord.HasASN() {
 		m.stats.GeoLiteASNHits++
 		record.ASN = ASNRecord{
-			Number:       asnRecord.AutonomousSystemNumber,
-			Organization: asnRecord.AutonomousSystemOrganization,
+			Number:       m.reusableGeoLiteASNRecord.AutonomousSystemNumber,
+			Organization: m.reusableGeoLiteASNRecord.AutonomousSystemOrganization,
 		}
 		return
 	}
 
 	// Priority 3: RouteViews ASN
-	routeViewsRecord, err := m.routeViewsASN.Lookup(ip)
-	if err == nil && routeViewsRecord.HasASN() {
+	if err := m.routeViewsASN.LookupTo(ip, &m.reusableRouteViewsRecord); err == nil && m.reusableRouteViewsRecord.HasASN() {
 		m.stats.RouteViewsASNHits++
 		record.ASN = ASNRecord{
-			Number:       routeViewsRecord.AutonomousSystemNumber,
-			Organization: routeViewsRecord.AutonomousSystemOrganization,
+			Number:       m.reusableRouteViewsRecord.AutonomousSystemNumber,
+			Organization: m.reusableRouteViewsRecord.AutonomousSystemOrganization,
 		}
 	}
 }

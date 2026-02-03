@@ -35,6 +35,11 @@ func (r *GeoWhoisCountryReader) Lookup(ip net.IP) (*GeoWhoisCountryRecord, error
 	return &record, nil
 }
 
+// LookupTo looks up an IP address into a pre-allocated record to reduce allocations
+func (r *GeoWhoisCountryReader) LookupTo(ip net.IP, record *GeoWhoisCountryRecord) error {
+	return r.Reader.Lookup(ip, record)
+}
+
 // LookupNetwork looks up an IP and returns the network and record
 func (r *GeoWhoisCountryReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoWhoisCountryRecord, bool, error) {
 	var record GeoWhoisCountryRecord

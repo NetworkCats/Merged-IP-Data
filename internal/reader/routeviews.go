@@ -36,6 +36,11 @@ func (r *RouteViewsASNReader) Lookup(ip net.IP) (*RouteViewsASNRecord, error) {
 	return &record, nil
 }
 
+// LookupTo looks up an IP address into a pre-allocated record to reduce allocations
+func (r *RouteViewsASNReader) LookupTo(ip net.IP, record *RouteViewsASNRecord) error {
+	return r.Reader.Lookup(ip, record)
+}
+
 // LookupNetwork looks up an IP and returns the network and record
 func (r *RouteViewsASNReader) LookupNetwork(ip net.IP) (*net.IPNet, *RouteViewsASNRecord, bool, error) {
 	var record RouteViewsASNRecord

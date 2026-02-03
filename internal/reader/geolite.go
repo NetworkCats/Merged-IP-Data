@@ -68,6 +68,11 @@ func (r *GeoLite2CityReader) Lookup(ip net.IP) (*GeoLite2CityRecord, error) {
 	return &record, nil
 }
 
+// LookupTo looks up an IP address into a pre-allocated record to reduce allocations
+func (r *GeoLite2CityReader) LookupTo(ip net.IP, record *GeoLite2CityRecord) error {
+	return r.Reader.Lookup(ip, record)
+}
+
 // LookupNetwork looks up an IP and returns the network and record
 func (r *GeoLite2CityReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoLite2CityRecord, bool, error) {
 	var record GeoLite2CityRecord

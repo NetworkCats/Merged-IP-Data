@@ -41,20 +41,28 @@ func (r *QQWryReader) Close() error {
 
 // Lookup looks up an IP address in the QQWry database
 func (r *QQWryReader) Lookup(ip net.IP) (*QQWryRecord, error) {
-	info, err := r.db.FindInfo(ip.String(), "CN")
-	if err != nil {
+	var record QQWryRecord
+	if err := r.LookupTo(ip, &record); err != nil {
 		return nil, err
 	}
+	return &record, nil
+}
 
-	return &QQWryRecord{
-		CountryName:   info.CountryName,
-		RegionName:    info.RegionName,
-		CityName:      info.CityName,
-		DistrictName:  info.DistrictName,
-		ISPDomain:     info.IspDomain,
-		CountryCode:   info.CountryCode,
-		ContinentCode: info.ContinentCode,
-	}, nil
+// LookupTo looks up an IP address into a pre-allocated record to reduce allocations
+func (r *QQWryReader) LookupTo(ip net.IP, record *QQWryRecord) error {
+	info, err := r.db.FindInfo(ip.String(), "CN")
+	if err != nil {
+		return err
+	}
+
+	record.CountryName = info.CountryName
+	record.RegionName = info.RegionName
+	record.CityName = info.CityName
+	record.DistrictName = info.DistrictName
+	record.ISPDomain = info.IspDomain
+	record.CountryCode = info.CountryCode
+	record.ContinentCode = info.ContinentCode
+	return nil
 }
 
 // LookupString looks up an IP address string in the QQWry database
