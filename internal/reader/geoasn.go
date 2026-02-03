@@ -58,3 +58,9 @@ func (r *GeoLite2ASNReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoLite2ASNRe
 func (r *GeoLite2ASNRecord) HasASN() bool {
 	return r.AutonomousSystemNumber != 0
 }
+
+// Reset clears all fields for reuse, reducing allocations
+func (r *GeoLite2ASNRecord) Reset() {
+	r.AutonomousSystemNumber = 0
+	r.AutonomousSystemOrganization = ""
+}

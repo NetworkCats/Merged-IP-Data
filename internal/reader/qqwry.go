@@ -112,3 +112,14 @@ func (r *QQWryRecord) HasRegionData() bool {
 func (r *QQWryRecord) IsChina() bool {
 	return r.CountryCode == "CN" || r.CountryName == "中国"
 }
+
+// Reset clears all fields for reuse, reducing allocations
+func (r *QQWryRecord) Reset() {
+	r.CountryName = ""
+	r.RegionName = ""
+	r.CityName = ""
+	r.DistrictName = ""
+	r.ISPDomain = ""
+	r.CountryCode = ""
+	r.ContinentCode = ""
+}

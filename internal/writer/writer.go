@@ -26,8 +26,8 @@ func New(tree *mmdbwriter.Tree, path string) *Writer {
 func (w *Writer) Write() error {
 	fmt.Printf("Writing merged database to %s...\n", w.path)
 
-	if err := os.MkdirAll(filepath.Dir(w.path), 0755); err != nil {
-		if !os.IsExist(err) {
+	if dir := filepath.Dir(w.path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create output directory: %w", err)
 		}
 	}

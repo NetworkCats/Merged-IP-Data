@@ -57,3 +57,8 @@ func (r *GeoWhoisCountryReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoWhoisC
 func (r *GeoWhoisCountryRecord) HasCountry() bool {
 	return r.CountryCode != ""
 }
+
+// Reset clears all fields for reuse, reducing allocations
+func (r *GeoWhoisCountryRecord) Reset() {
+	r.CountryCode = ""
+}

@@ -58,3 +58,9 @@ func (r *RouteViewsASNReader) LookupNetwork(ip net.IP) (*net.IPNet, *RouteViewsA
 func (r *RouteViewsASNRecord) HasASN() bool {
 	return r.AutonomousSystemNumber != 0
 }
+
+// Reset clears all fields for reuse, reducing allocations
+func (r *RouteViewsASNRecord) Reset() {
+	r.AutonomousSystemNumber = 0
+	r.AutonomousSystemOrganization = ""
+}

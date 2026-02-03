@@ -282,6 +282,7 @@ func (m *Merger) processDBIPReader(r *reader.Reader) error {
 		ip := network.IP
 
 		// Use reusable record to check if GeoLite2 has data for this IP
+		m.reusableGeoLiteCityRecord.Reset()
 		if err := m.geoLiteCity.LookupTo(ip, &m.reusableGeoLiteCityRecord); err == nil && m.reusableGeoLiteCityRecord.HasGeoData() {
 			continue
 		}
@@ -415,6 +416,7 @@ func (m *Merger) enrichWithCountryFallback(ip net.IP, record *MergedRecord) {
 		return
 	}
 
+	m.reusableGeoWhoisRecord.Reset()
 	if err := m.geoWhoisCountry.LookupTo(ip, &m.reusableGeoWhoisRecord); err == nil && m.reusableGeoWhoisRecord.HasCountry() {
 		m.stats.GeoWhoisCountryHits++
 		record.Country.ISOCode = m.reusableGeoWhoisRecord.CountryCode
@@ -429,6 +431,7 @@ func (m *Merger) enrichWithQQWryData(ip net.IP, record *MergedRecord) {
 		return
 	}
 
+	m.reusableQQWryRecord.Reset()
 	if err := m.qqwry.LookupTo(ip, &m.reusableQQWryRecord); err != nil || !m.reusableQQWryRecord.HasGeoData() {
 		return
 	}
@@ -474,6 +477,7 @@ func (m *Merger) enrichWithQQWryData(ip net.IP, record *MergedRecord) {
 // enrichWithASNData adds ASN information from IPinfo Lite (primary), GeoLite2-ASN (secondary), or RouteViews (tertiary)
 func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 	// Priority 1: IPinfo Lite (includes as_domain)
+	m.reusableIPinfoRecord.Reset()
 	if err := m.ipinfoLite.LookupTo(ip, &m.reusableIPinfoRecord); err == nil && m.reusableIPinfoRecord.HasASN() {
 		m.stats.IPinfoLiteHits++
 		record.ASN = ASNRecord{
@@ -485,6 +489,7 @@ func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 	}
 
 	// Priority 2: GeoLite2-ASN
+	m.reusableGeoLiteASNRecord.Reset()
 	if err := m.geoLiteASN.LookupTo(ip, &m.reusableGeoLiteASNRecord); err == nil && m.reusableGeoLiteASNRecord.HasASN() {
 		m.stats.GeoLiteASNHits++
 		record.ASN = ASNRecord{
@@ -495,6 +500,7 @@ func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 	}
 
 	// Priority 3: RouteViews ASN
+	m.reusableRouteViewsRecord.Reset()
 	if err := m.routeViewsASN.LookupTo(ip, &m.reusableRouteViewsRecord); err == nil && m.reusableRouteViewsRecord.HasASN() {
 		m.stats.RouteViewsASNHits++
 		record.ASN = ASNRecord{

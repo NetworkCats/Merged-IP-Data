@@ -113,7 +113,20 @@ func (r *DBIPCityRecord) HasGeoData() bool {
 	return r.CountryCode != "" || r.City != ""
 }
 
-// HasLocationData checks if the record has coordinate data
+// HasLocationData checks if the record has coordinate data.
+// Note: (0,0) is a valid coordinate but extremely rare in real IP data.
 func (r *DBIPCityRecord) HasLocationData() bool {
-	return r.Latitude != 0 || r.Longitude != 0
+	return r.Latitude != 0 || r.Longitude != 0 || r.Timezone != ""
+}
+
+// Reset clears all fields for reuse, reducing allocations
+func (r *DBIPCityRecord) Reset() {
+	r.City = ""
+	r.CountryCode = ""
+	r.Latitude = 0
+	r.Longitude = 0
+	r.Postcode = ""
+	r.State1 = ""
+	r.State2 = ""
+	r.Timezone = ""
 }

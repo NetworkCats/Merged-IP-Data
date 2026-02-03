@@ -340,11 +340,14 @@ func (r *MergedRecord) subdivisionsToMMDBType() mmdbtype.Slice {
 
 	result := make(mmdbtype.Slice, 0, len(r.Subdivisions))
 	for _, sub := range r.Subdivisions {
-		if subMap := sub.toMMDBType(); len(subMap) > 0 {
+		if subMap := sub.toMMDBType(); subMap != nil {
 			result = append(result, subMap)
 		}
 	}
 
+	if len(result) == 0 {
+		return nil
+	}
 	return result
 }
 

@@ -83,3 +83,14 @@ func (r *IPinfoLiteRecord) GetASNumber() uint32 {
 	}
 	return uint32(asn)
 }
+
+// Reset clears all fields for reuse, reducing allocations
+func (r *IPinfoLiteRecord) Reset() {
+	r.ASDomain = ""
+	r.ASName = ""
+	r.ASN = ""
+	r.Continent = ""
+	r.ContinentCode = ""
+	r.Country = ""
+	r.CountryCode = ""
+}

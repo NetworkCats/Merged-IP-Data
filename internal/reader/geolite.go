@@ -91,7 +91,31 @@ func (r *GeoLite2CityRecord) HasGeoData() bool {
 	return r.Country.ISOCode != "" || r.City.GeonameID != 0
 }
 
-// HasLocationData checks if the record has coordinate data
+// HasLocationData checks if the record has coordinate data.
+// Note: (0,0) is a valid coordinate but extremely rare in real IP data.
 func (r *GeoLite2CityRecord) HasLocationData() bool {
-	return r.Location.Latitude != 0 || r.Location.Longitude != 0
+	return r.Location.AccuracyRadius != 0 || r.Location.Latitude != 0 ||
+		r.Location.Longitude != 0 || r.Location.TimeZone != ""
+}
+
+// Reset clears all fields for reuse, reducing allocations
+func (r *GeoLite2CityRecord) Reset() {
+	r.City.GeonameID = 0
+	r.City.Names = nil
+	r.Continent.Code = ""
+	r.Continent.GeonameID = 0
+	r.Continent.Names = nil
+	r.Country.GeonameID = 0
+	r.Country.ISOCode = ""
+	r.Country.Names = nil
+	r.Location.AccuracyRadius = 0
+	r.Location.Latitude = 0
+	r.Location.Longitude = 0
+	r.Location.MetroCode = 0
+	r.Location.TimeZone = ""
+	r.Postal.Code = ""
+	r.RegisteredCountry.GeonameID = 0
+	r.RegisteredCountry.ISOCode = ""
+	r.RegisteredCountry.Names = nil
+	r.Subdivisions = nil
 }
