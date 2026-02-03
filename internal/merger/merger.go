@@ -239,8 +239,9 @@ func (m *Merger) Merge() error {
 	startTime := time.Now()
 	logMemStats("Start")
 
-	fmt.Println("Processing GeoLite2-City networks (primary source)...")
-	if err := m.processGeoLiteCityNetworks(); err != nil {
+	numWorkers := runtime.NumCPU()
+	fmt.Printf("Processing GeoLite2-City networks (primary source) with %d workers...\n", numWorkers)
+	if err := m.processGeoLiteCityNetworksParallel(numWorkers); err != nil {
 		return fmt.Errorf("failed to process GeoLite2-City: %w", err)
 	}
 	logMemStats("After GeoLite2-City")
@@ -307,6 +308,95 @@ func (m *Merger) processGeoLiteCityNetworks() error {
 	}
 
 	return networks.Err()
+}
+
+// processGeoLiteCityNetworksParallel processes GeoLite2-City networks using parallel workers.
+// This significantly speeds up processing on multi-core systems by:
+// 1. Reading networks from GeoLite2-City sequentially (iterator is not thread-safe)
+// 2. Processing enrichment (ASN, QQWry, etc.) in parallel via worker pool
+// 3. Inserting results into the tree sequentially (tree is not thread-safe)
+func (m *Merger) processGeoLiteCityNetworksParallel(numWorkers int) error {
+	// Create worker pool
+	pool := newWorkerPool(
+		numWorkers,
+		m.ipinfoLite,
+		m.geoLiteASN,
+		m.routeViewsASN,
+		m.geoWhoisCountry,
+		m.qqwry,
+		m.openproxyDB,
+	)
+
+	// Start workers
+	pool.start()
+
+	// Start result consumer in a separate goroutine
+	var insertErr error
+	var insertedCount int64
+	insertDone := make(chan struct{})
+
+	go func() {
+		defer close(insertDone)
+		for result := range pool.results() {
+			if err := m.tree.Insert(result.network, result.mmdbRecord); err != nil {
+				fmt.Printf("Warning: failed to insert network %s: %v\n", result.network, err)
+				continue
+			}
+			insertedCount++
+			if insertedCount%100000 == 0 {
+				fmt.Printf("  Inserted %d networks...\n", insertedCount)
+			}
+		}
+	}()
+
+	// Read networks and submit to worker pool
+	networks := m.geoLiteCity.Networks()
+	for networks.Next() {
+		var geoRecord reader.GeoLite2CityRecord
+		network, err := networks.Network(&geoRecord)
+		if err != nil {
+			fmt.Printf("Warning: failed to read network: %v\n", err)
+			continue
+		}
+
+		pool.submit(workItem{
+			network:   network,
+			geoRecord: geoRecord,
+		})
+	}
+
+	// Signal no more work
+	pool.closeWork()
+
+	// Wait for all workers to finish
+	pool.wait()
+
+	// Wait for all insertions to complete
+	<-insertDone
+
+	// Check for iterator errors
+	if err := networks.Err(); err != nil {
+		return err
+	}
+
+	if insertErr != nil {
+		return insertErr
+	}
+
+	// Aggregate statistics from workers
+	workerStats := pool.aggregateStats()
+	m.stats.TotalNetworks = workerStats.TotalNetworks
+	m.stats.GeoLiteCityHits = workerStats.GeoLiteCityHits
+	m.stats.GeoLiteASNHits = workerStats.GeoLiteASNHits
+	m.stats.IPinfoLiteHits = workerStats.IPinfoLiteHits
+	m.stats.RouteViewsASNHits = workerStats.RouteViewsASNHits
+	m.stats.GeoWhoisCountryHits = workerStats.GeoWhoisCountryHits
+	m.stats.QQWryHits = workerStats.QQWryHits
+	m.stats.OpenproxyDBHits = workerStats.OpenproxyDBHits
+	m.stats.EmptyRecords = workerStats.EmptyRecords
+	m.stats.ProcessedNetworks = insertedCount
+
+	return nil
 }
 
 // processDBIPNetworks processes DB-IP networks for IPs not covered by GeoLite2
