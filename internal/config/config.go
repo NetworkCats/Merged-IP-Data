@@ -9,6 +9,7 @@ const (
 	DBIPCityIPv6URL    = "https://unpkg.com/@ip-location-db/dbip-city-mmdb/dbip-city-ipv6.mmdb"
 	RouteViewsASNURL   = "https://cdn.jsdelivr.net/npm/@ip-location-db/asn-mmdb/asn.mmdb"
 	GeoWhoisCountryURL = "https://cdn.jsdelivr.net/npm/@ip-location-db/geolite2-geo-whois-asn-country-mmdb/geolite2-geo-whois-asn-country.mmdb"
+	QQWryURL           = "https://cdn.jsdelivr.net/npm/qqwry.ipdb/qqwry.ipdb"
 )
 
 // Local file paths for downloaded databases
@@ -20,6 +21,7 @@ const (
 	DBIPCityIPv6File    = "download/dbip-city-ipv6.mmdb"
 	RouteViewsASNFile   = "download/routeviews-asn.mmdb"
 	GeoWhoisCountryFile = "download/geolite2-geo-whois-asn-country.mmdb"
+	QQWryFile           = "download/qqwry.ipdb"
 )
 
 // Output file path
@@ -70,5 +72,6 @@ func GetAllSources() []DatabaseSource {
 		{Name: "DB-IP-IPv6", URL: DBIPCityIPv6URL, Path: DBIPCityIPv6File},
 		{Name: "RouteViews-ASN", URL: RouteViewsASNURL, Path: RouteViewsASNFile},
 		{Name: "GeoWhois-Country", URL: GeoWhoisCountryURL, Path: GeoWhoisCountryFile},
+		{Name: "QQWry-Chunzhen", URL: QQWryURL, Path: QQWryFile},
 	}
 }

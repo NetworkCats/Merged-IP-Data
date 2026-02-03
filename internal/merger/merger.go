@@ -37,6 +37,7 @@ type Merger struct {
 	dbipCity        *reader.DBIPCityReader
 	routeViewsASN   *reader.RouteViewsASNReader
 	geoWhoisCountry *reader.GeoWhoisCountryReader
+	qqwry           *reader.QQWryReader
 
 	tree *mmdbwriter.Tree
 
@@ -52,6 +53,7 @@ type Stats struct {
 	DBIPHits            int64
 	RouteViewsASNHits   int64
 	GeoWhoisCountryHits int64
+	QQWryHits           int64
 	EmptyRecords        int64
 	ProcessedNetworks   int64
 }
@@ -102,6 +104,13 @@ func New() (*Merger, error) {
 	}
 	closers = append(closers, geoWhoisCountry)
 
+	qqwry, err := reader.OpenQQWry()
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to open QQWry: %w", err)
+	}
+	closers = append(closers, qqwry)
+
 	tree, err := mmdbwriter.New(mmdbwriter.Options{
 		DatabaseType:            config.DatabaseType,
 		Description:             map[string]string{"en": config.DatabaseDescription},
@@ -123,6 +132,7 @@ func New() (*Merger, error) {
 		dbipCity:        dbipCity,
 		routeViewsASN:   routeViewsASN,
 		geoWhoisCountry: geoWhoisCountry,
+		qqwry:           qqwry,
 		tree:            tree,
 	}, nil
 }
@@ -158,6 +168,11 @@ func (m *Merger) Close() error {
 	}
 	if m.geoWhoisCountry != nil {
 		if err := m.geoWhoisCountry.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if m.qqwry != nil {
+		if err := m.qqwry.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -342,6 +357,7 @@ func (m *Merger) buildMergedRecord(network *net.IPNet, geoRecord *reader.GeoLite
 
 	m.enrichWithASNData(network.IP, record)
 	m.enrichWithCountryFallback(network.IP, record)
+	m.enrichWithQQWryData(network.IP, record)
 }
 
 // buildMergedRecordFromDBIP creates a merged record using DB-IP as primary geo source.
@@ -382,6 +398,7 @@ func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reade
 
 	m.enrichWithASNData(network.IP, record)
 	m.enrichWithCountryFallback(network.IP, record)
+	m.enrichWithQQWryData(network.IP, record)
 }
 
 // enrichWithCountryFallback adds country information from GeoWhois when country is missing
@@ -394,6 +411,57 @@ func (m *Merger) enrichWithCountryFallback(ip net.IP, record *MergedRecord) {
 	if err == nil && geoWhoisRecord.HasCountry() {
 		m.stats.GeoWhoisCountryHits++
 		record.Country.ISOCode = geoWhoisRecord.CountryCode
+	}
+}
+
+// enrichWithQQWryData adds Chinese location data from QQWry (Chunzhen) database for Chinese IPs.
+// This provides more accurate and detailed Chinese location names (zh-CN) for IPs in China.
+func (m *Merger) enrichWithQQWryData(ip net.IP, record *MergedRecord) {
+	// Only enrich for Chinese IPs
+	if record.Country.ISOCode != "CN" {
+		return
+	}
+
+	qqwryRecord, err := m.qqwry.Lookup(ip)
+	if err != nil || !qqwryRecord.HasGeoData() {
+		return
+	}
+
+	// Verify the record is indeed for China
+	if !qqwryRecord.IsChina() {
+		return
+	}
+
+	m.stats.QQWryHits++
+
+	// Enrich city names with Chinese (zh-CN)
+	if qqwryRecord.HasCityData() {
+		if record.City.Names == nil {
+			record.City.Names = make(map[string]string)
+		}
+		record.City.Names["zh-CN"] = qqwryRecord.CityName
+	}
+
+	// Enrich subdivision (province) names with Chinese (zh-CN)
+	if qqwryRecord.HasRegionData() {
+		if len(record.Subdivisions) == 0 {
+			record.Subdivisions = []SubdivisionRecord{{
+				Names: map[string]string{"zh-CN": qqwryRecord.RegionName},
+			}}
+		} else {
+			if record.Subdivisions[0].Names == nil {
+				record.Subdivisions[0].Names = make(map[string]string)
+			}
+			record.Subdivisions[0].Names["zh-CN"] = qqwryRecord.RegionName
+		}
+	}
+
+	// Add Chinese country name if not present
+	if record.Country.Names == nil {
+		record.Country.Names = make(map[string]string)
+	}
+	if _, ok := record.Country.Names["zh-CN"]; !ok {
+		record.Country.Names["zh-CN"] = qqwryRecord.CountryName
 	}
 }
 
@@ -486,6 +554,7 @@ func (m *Merger) printStats() {
 	fmt.Printf("  RouteViews ASN hits: %d\n", m.stats.RouteViewsASNHits)
 	fmt.Printf("  DB-IP supplementary records: %d\n", m.stats.DBIPHits)
 	fmt.Printf("  GeoWhois Country fallback hits: %d\n", m.stats.GeoWhoisCountryHits)
+	fmt.Printf("  QQWry (Chunzhen) China enrichment hits: %d\n", m.stats.QQWryHits)
 	fmt.Printf("  Empty records skipped: %d\n", m.stats.EmptyRecords)
 	fmt.Printf("  Final network count: %d\n", m.stats.ProcessedNetworks)
 }

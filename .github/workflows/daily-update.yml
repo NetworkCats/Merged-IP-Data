@@ -69,11 +69,13 @@ jobs:
             - **GeoLite2-ASN** - Fallback source for ASN data
             - **IPinfo Lite** - Primary source for ASN, AS organization, and AS domain
             - **DB-IP City** - Supplementary source for geo data
+            - **QQWry (Chunzhen)** - Enhanced Chinese IP data with accurate province/city names in Chinese (zh-CN)
             
             ## Features
             - Unified IPv6 database (with IPv4 aliasing)
             - Multi-language support: de, en, es, fr, ja, pt-BR, ru, zh-CN
             - Priority-based field-level merge for maximum accuracy
+            - Enhanced Chinese IP geolocation with native Chinese names from QQWry database
             
             ## Usage
             ```bash
