@@ -95,74 +95,6 @@ Download the latest merged database from [Releases](../../releases/latest):
 wget https://github.com/YOUR_USERNAME/Merged-IP-Data/releases/latest/download/Merged-IP.mmdb
 ```
 
-## Usage Examples
-
-### Using mmdblookup (CLI)
-
-```bash
-mmdblookup --file Merged-IP.mmdb --ip 8.8.8.8
-```
-
-### Using Go
-
-```go
-package main
-
-import (
-    "fmt"
-    "net"
-
-    "github.com/oschwald/maxminddb-golang"
-)
-
-type Record struct {
-    Country struct {
-        ISOCode string            `maxminddb:"iso_code"`
-        Names   map[string]string `maxminddb:"names"`
-    } `maxminddb:"country"`
-    City struct {
-        Names map[string]string `maxminddb:"names"`
-    } `maxminddb:"city"`
-    ASN struct {
-        Number       uint32 `maxminddb:"autonomous_system_number"`
-        Organization string `maxminddb:"autonomous_system_organization"`
-        Domain       string `maxminddb:"as_domain"`
-    } `maxminddb:"asn"`
-}
-
-func main() {
-    db, err := maxminddb.Open("Merged-IP.mmdb")
-    if err != nil {
-        panic(err)
-    }
-    defer db.Close()
-
-    ip := net.ParseIP("8.8.8.8")
-    var record Record
-    err = db.Lookup(ip, &record)
-    if err != nil {
-        panic(err)
-    }
-
-    fmt.Printf("Country: %s (%s)\n", record.Country.Names["en"], record.Country.ISOCode)
-    fmt.Printf("City: %s\n", record.City.Names["en"])
-    fmt.Printf("ASN: AS%d %s (%s)\n", record.ASN.Number, record.ASN.Organization, record.ASN.Domain)
-}
-```
-
-### Using Python
-
-```python
-import maxminddb
-
-with maxminddb.open_database('Merged-IP.mmdb') as reader:
-    record = reader.get('8.8.8.8')
-    
-    print(f"Country: {record['country']['names']['en']} ({record['country']['iso_code']})")
-    print(f"City: {record.get('city', {}).get('names', {}).get('en', 'N/A')}")
-    print(f"ASN: AS{record['asn']['autonomous_system_number']} {record['asn']['autonomous_system_organization']}")
-```
-
 ## Building from Source
 
 ### Prerequisites
@@ -201,10 +133,9 @@ The database is automatically updated daily at 1:00 UTC via GitHub Actions. Each
 
 This project merges data from multiple sources. Please refer to each source's license:
 
-- GeoLite2: [MaxMind GeoLite2 End User License Agreement](https://www.maxmind.com/en/geolite2/eula)
-- IPinfo Lite: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
+- GeoLite2: [Creative Commons Corporation Attribution-ShareAlike 4.0 International License (the "Creative Commons License")](https://creativecommons.org/licenses/by-sa/4.0/)
+- IPinfo Lite: [Creative Commons Attribution-ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-sa/4.0/)
 - DB-IP: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - RouteViews ASN: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
-- ip-location-db databases: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 
 The merge tool source code is provided as-is for educational and personal use.
