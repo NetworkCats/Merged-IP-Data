@@ -17,6 +17,10 @@ type IPinfoLiteRecord struct {
 	ContinentCode string `maxminddb:"continent_code"`
 	Country       string `maxminddb:"country"`
 	CountryCode   string `maxminddb:"country_code"`
+
+	// Cached parsed ASN number to avoid repeated string parsing
+	cachedASNumber uint32
+	asnParsed      bool
 }
 
 // IPinfoLiteReader reads the IPinfo Lite database
@@ -71,17 +75,28 @@ func (r *IPinfoLiteRecord) HasGeoData() bool {
 	return r.CountryCode != ""
 }
 
-// GetASNumber extracts the numeric ASN from the "AS12345" format
+// GetASNumber extracts the numeric ASN from the "AS12345" format.
+// The result is cached to avoid repeated string parsing.
 func (r *IPinfoLiteRecord) GetASNumber() uint32 {
+	if r.asnParsed {
+		return r.cachedASNumber
+	}
+
+	r.asnParsed = true
 	if r.ASN == "" {
+		r.cachedASNumber = 0
 		return 0
 	}
+
 	asnStr := strings.TrimPrefix(r.ASN, "AS")
 	asn, err := strconv.ParseUint(asnStr, 10, 32)
 	if err != nil {
+		r.cachedASNumber = 0
 		return 0
 	}
-	return uint32(asn)
+
+	r.cachedASNumber = uint32(asn)
+	return r.cachedASNumber
 }
 
 // Reset clears all fields for reuse, reducing allocations
@@ -93,4 +108,6 @@ func (r *IPinfoLiteRecord) Reset() {
 	r.ContinentCode = ""
 	r.Country = ""
 	r.CountryCode = ""
+	r.cachedASNumber = 0
+	r.asnParsed = false
 }

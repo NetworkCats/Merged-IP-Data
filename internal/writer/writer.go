@@ -1,12 +1,15 @@
 package writer
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/maxmind/mmdbwriter"
 )
+
+const writeBufferSize = 4 * 1024 * 1024 // 4MB buffer for optimized I/O
 
 // Writer handles writing the merged database to a file
 type Writer struct {
@@ -38,7 +41,14 @@ func (w *Writer) Write() error {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
 
-	written, err := w.tree.WriteTo(file)
+	// Use buffered writer for optimized I/O performance
+	bufferedWriter := bufio.NewWriterSize(file, writeBufferSize)
+	written, err := w.tree.WriteTo(bufferedWriter)
+
+	// Flush buffered data before closing
+	if flushErr := bufferedWriter.Flush(); flushErr != nil && err == nil {
+		err = flushErr
+	}
 	if closeErr := file.Close(); closeErr != nil && err == nil {
 		err = closeErr
 	}
