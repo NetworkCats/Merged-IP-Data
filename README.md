@@ -12,6 +12,8 @@ A Go program that merges multiple IP geolocation databases into a single, compre
 | [DB-IP City](https://db-ip.com/) | Supplementary geo data | IPv4 + IPv6 |
 | [RouteViews ASN](https://www.npmjs.com/package/@ip-location-db/asn-mmdb) | ASN fallback (tertiary) | IPv4 + IPv6 |
 | [GeoLite2-Geo-Whois-ASN-Country](https://www.npmjs.com/package/@ip-location-db/geolite2-geo-whois-asn-country-mmdb) | Country fallback | IPv4 + IPv6 |
+| [QQWry (Chunzhen)](https://github.com/metowolf/qqwry.ipdb) | Enhanced Chinese IP geolocation with native zh-CN names | IPv4 |
+| [OpenProxyDB](https://github.com/NetworkCats/OpenProxyDB) | Proxy, VPN, Tor, hosting, and CDN detection | IPv4 + IPv6 |
 
 ## Merge Priority
 
@@ -22,9 +24,10 @@ The merge logic uses a priority-based approach to select the most accurate data 
 | Country | GeoLite2-City | DB-IP | GeoWhois-Country |
 | City, Coordinates | GeoLite2-City | DB-IP | - |
 | Timezone, Subdivisions | GeoLite2-City | DB-IP | - |
-| Multi-language Names | GeoLite2-City | - | - |
+| Multi-language Names | GeoLite2-City | QQWry (zh-CN for China) | - |
 | ASN, AS Organization | IPinfo Lite | GeoLite2-ASN | RouteViews ASN |
 | AS Domain | IPinfo Lite | - | - |
+| Proxy/Anonymity Data | OpenProxyDB | - | - |
 
 ## Output Format
 
@@ -72,6 +75,15 @@ The merged database contains the following fields:
     "autonomous_system_number": <uint32>,
     "autonomous_system_organization": "...",
     "as_domain": "..."
+  },
+  "proxy": {
+    "is_proxy": <bool>,
+    "is_vpn": <bool>,
+    "is_tor": <bool>,
+    "is_hosting": <bool>,
+    "is_cdn": <bool>,
+    "is_school": <bool>,
+    "is_anonymous": <bool>
   }
 }
 ```
@@ -99,7 +111,7 @@ wget https://github.com/YOUR_USERNAME/Merged-IP-Data/releases/latest/download/Me
 
 ### Prerequisites
 
-- Go 1.22 or later
+- Go 1.25 or later
 
 ### Build
 
@@ -133,9 +145,11 @@ The database is automatically updated daily at 1:00 UTC via GitHub Actions. Each
 
 This project merges data from multiple sources. Please refer to each source's license:
 
-- GeoLite2: [Creative Commons Corporation Attribution-ShareAlike 4.0 International License (the "Creative Commons License")](https://creativecommons.org/licenses/by-sa/4.0/)
+- GeoLite2: [Creative Commons Attribution-ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-sa/4.0/)
 - IPinfo Lite: [Creative Commons Attribution-ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-sa/4.0/)
 - DB-IP: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - RouteViews ASN: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
+- QQWry (Chunzhen): Public domain
+- OpenProxyDB: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
 
 The merge tool source code is provided as-is for educational and personal use.
