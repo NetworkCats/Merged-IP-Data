@@ -4,14 +4,28 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"time"
 
 	"merged-ip-data/internal/config"
+	"merged-ip-data/internal/interner"
 	"merged-ip-data/internal/reader"
 
 	"github.com/maxmind/mmdbwriter"
 	"github.com/maxmind/mmdbwriter/mmdbtype"
 )
+
+// logMemStats logs current memory statistics for profiling
+func logMemStats(phase string) {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	fmt.Printf("[Memory] %s: Alloc=%d MB, TotalAlloc=%d MB, Sys=%d MB, NumGC=%d\n",
+		phase,
+		m.Alloc/1024/1024,
+		m.TotalAlloc/1024/1024,
+		m.Sys/1024/1024,
+		m.NumGC)
+}
 
 // closerList holds a list of io.Closers for cleanup
 type closerList []io.Closer
@@ -68,6 +82,9 @@ type Stats struct {
 
 // New creates a new Merger instance
 func New() (*Merger, error) {
+	// Initialize string interner with common values
+	interner.Init()
+
 	var closers closerList
 	cleanup := func() { closers.closeAll() }
 
@@ -195,20 +212,34 @@ func (m *Merger) Close() error {
 func (m *Merger) Merge() error {
 	fmt.Println("Starting database merge...")
 	startTime := time.Now()
+	logMemStats("Start")
 
 	fmt.Println("Processing GeoLite2-City networks (primary source)...")
 	if err := m.processGeoLiteCityNetworks(); err != nil {
 		return fmt.Errorf("failed to process GeoLite2-City: %w", err)
 	}
+	logMemStats("After GeoLite2-City")
+
+	// Release memory from completed phase before starting next
+	runtime.GC()
+	logMemStats("After GC (Phase 1)")
 
 	fmt.Println("Processing DB-IP networks (supplementary data)...")
 	if err := m.processDBIPNetworks(); err != nil {
 		return fmt.Errorf("failed to process DB-IP: %w", err)
 	}
+	logMemStats("After DB-IP")
+
+	// Final GC before write phase
+	runtime.GC()
+	logMemStats("After GC (Phase 2)")
 
 	elapsed := time.Since(startTime)
 	fmt.Printf("Merge completed in %v\n", elapsed)
 	m.printStats()
+
+	// Print interner statistics
+	fmt.Printf("[Interner] %s\n", interner.Stats())
 
 	return nil
 }

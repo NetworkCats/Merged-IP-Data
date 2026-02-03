@@ -1,7 +1,34 @@
 package merger
 
 import (
+	"merged-ip-data/internal/interner"
+
 	"github.com/maxmind/mmdbwriter/mmdbtype"
+)
+
+// Pre-defined mmdbtype.String keys to avoid repeated allocations.
+// These are used as map keys in ToMMDBType() methods.
+var (
+	keyCity              = mmdbtype.String("city")
+	keyContinent         = mmdbtype.String("continent")
+	keyCountry           = mmdbtype.String("country")
+	keyLocation          = mmdbtype.String("location")
+	keyPostal            = mmdbtype.String("postal")
+	keyRegisteredCountry = mmdbtype.String("registered_country")
+	keySubdivisions      = mmdbtype.String("subdivisions")
+	keyASN               = mmdbtype.String("asn")
+	keyGeonameID         = mmdbtype.String("geoname_id")
+	keyNames             = mmdbtype.String("names")
+	keyCode              = mmdbtype.String("code")
+	keyISOCode           = mmdbtype.String("iso_code")
+	keyAccuracyRadius    = mmdbtype.String("accuracy_radius")
+	keyLatitude          = mmdbtype.String("latitude")
+	keyLongitude         = mmdbtype.String("longitude")
+	keyMetroCode         = mmdbtype.String("metro_code")
+	keyTimeZone          = mmdbtype.String("time_zone")
+	keyASNumber          = mmdbtype.String("autonomous_system_number")
+	keyASOrg             = mmdbtype.String("autonomous_system_organization")
+	keyASDomain          = mmdbtype.String("as_domain")
 )
 
 // MergedRecord represents the unified record structure for the output database.
@@ -113,28 +140,28 @@ func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
 	result := make(mmdbtype.Map, count)
 
 	if city != nil {
-		result["city"] = city
+		result[keyCity] = city
 	}
 	if continent != nil {
-		result["continent"] = continent
+		result[keyContinent] = continent
 	}
 	if country != nil {
-		result["country"] = country
+		result[keyCountry] = country
 	}
 	if location != nil {
-		result["location"] = location
+		result[keyLocation] = location
 	}
 	if postal != nil {
-		result["postal"] = postal
+		result[keyPostal] = postal
 	}
 	if regCountry != nil {
-		result["registered_country"] = regCountry
+		result[keyRegisteredCountry] = regCountry
 	}
 	if subdivisions != nil {
-		result["subdivisions"] = subdivisions
+		result[keySubdivisions] = subdivisions
 	}
 	if asn != nil {
-		result["asn"] = asn
+		result[keyASN] = asn
 	}
 
 	return result
@@ -156,15 +183,15 @@ func (c *CityRecord) toMMDBType() mmdbtype.Map {
 	result := make(mmdbtype.Map, count)
 
 	if c.GeonameID != 0 {
-		result["geoname_id"] = mmdbtype.Uint32(c.GeonameID)
+		result[keyGeonameID] = mmdbtype.Uint32(c.GeonameID)
 	}
 
 	if len(c.Names) > 0 {
 		names := make(mmdbtype.Map, len(c.Names))
 		for lang, name := range c.Names {
-			names[mmdbtype.String(lang)] = mmdbtype.String(name)
+			names[mmdbtype.String(interner.Intern(lang))] = mmdbtype.String(interner.Intern(name))
 		}
-		result["names"] = names
+		result[keyNames] = names
 	}
 
 	return result
@@ -189,19 +216,19 @@ func (c *ContinentRecord) toMMDBType() mmdbtype.Map {
 	result := make(mmdbtype.Map, count)
 
 	if c.Code != "" {
-		result["code"] = mmdbtype.String(c.Code)
+		result[keyCode] = mmdbtype.String(interner.Intern(c.Code))
 	}
 
 	if c.GeonameID != 0 {
-		result["geoname_id"] = mmdbtype.Uint32(c.GeonameID)
+		result[keyGeonameID] = mmdbtype.Uint32(c.GeonameID)
 	}
 
 	if len(c.Names) > 0 {
 		names := make(mmdbtype.Map, len(c.Names))
 		for lang, name := range c.Names {
-			names[mmdbtype.String(lang)] = mmdbtype.String(name)
+			names[mmdbtype.String(interner.Intern(lang))] = mmdbtype.String(interner.Intern(name))
 		}
-		result["names"] = names
+		result[keyNames] = names
 	}
 
 	return result
@@ -226,19 +253,19 @@ func (c *CountryRecord) toMMDBType() mmdbtype.Map {
 	result := make(mmdbtype.Map, count)
 
 	if c.GeonameID != 0 {
-		result["geoname_id"] = mmdbtype.Uint32(c.GeonameID)
+		result[keyGeonameID] = mmdbtype.Uint32(c.GeonameID)
 	}
 
 	if c.ISOCode != "" {
-		result["iso_code"] = mmdbtype.String(c.ISOCode)
+		result[keyISOCode] = mmdbtype.String(interner.Intern(c.ISOCode))
 	}
 
 	if len(c.Names) > 0 {
 		names := make(mmdbtype.Map, len(c.Names))
 		for lang, name := range c.Names {
-			names[mmdbtype.String(lang)] = mmdbtype.String(name)
+			names[mmdbtype.String(interner.Intern(lang))] = mmdbtype.String(interner.Intern(name))
 		}
-		result["names"] = names
+		result[keyNames] = names
 	}
 
 	return result
@@ -266,21 +293,21 @@ func (l *LocationRecord) toMMDBType() mmdbtype.Map {
 	result := make(mmdbtype.Map, count)
 
 	if l.AccuracyRadius != 0 {
-		result["accuracy_radius"] = mmdbtype.Uint16(l.AccuracyRadius)
+		result[keyAccuracyRadius] = mmdbtype.Uint16(l.AccuracyRadius)
 	}
 
 	// Use HasCoordinates flag to correctly handle (0,0) as a valid location
 	if l.HasCoordinates {
-		result["latitude"] = mmdbtype.Float64(l.Latitude)
-		result["longitude"] = mmdbtype.Float64(l.Longitude)
+		result[keyLatitude] = mmdbtype.Float64(l.Latitude)
+		result[keyLongitude] = mmdbtype.Float64(l.Longitude)
 	}
 
 	if l.MetroCode != 0 {
-		result["metro_code"] = mmdbtype.Uint16(l.MetroCode)
+		result[keyMetroCode] = mmdbtype.Uint16(l.MetroCode)
 	}
 
 	if l.TimeZone != "" {
-		result["time_zone"] = mmdbtype.String(l.TimeZone)
+		result[keyTimeZone] = mmdbtype.String(interner.Intern(l.TimeZone))
 	}
 
 	return result
@@ -292,7 +319,7 @@ func (p *PostalRecord) toMMDBType() mmdbtype.Map {
 	}
 
 	result := make(mmdbtype.Map, 1)
-	result["code"] = mmdbtype.String(p.Code)
+	result[keyCode] = mmdbtype.String(p.Code)
 	return result
 }
 
@@ -315,19 +342,19 @@ func (s *SubdivisionRecord) toMMDBType() mmdbtype.Map {
 	result := make(mmdbtype.Map, count)
 
 	if s.GeonameID != 0 {
-		result["geoname_id"] = mmdbtype.Uint32(s.GeonameID)
+		result[keyGeonameID] = mmdbtype.Uint32(s.GeonameID)
 	}
 
 	if s.ISOCode != "" {
-		result["iso_code"] = mmdbtype.String(s.ISOCode)
+		result[keyISOCode] = mmdbtype.String(interner.Intern(s.ISOCode))
 	}
 
 	if len(s.Names) > 0 {
 		names := make(mmdbtype.Map, len(s.Names))
 		for lang, name := range s.Names {
-			names[mmdbtype.String(lang)] = mmdbtype.String(name)
+			names[mmdbtype.String(interner.Intern(lang))] = mmdbtype.String(interner.Intern(name))
 		}
-		result["names"] = names
+		result[keyNames] = names
 	}
 
 	return result
@@ -370,15 +397,15 @@ func (a *ASNRecord) toMMDBType() mmdbtype.Map {
 	result := make(mmdbtype.Map, count)
 
 	if a.Number != 0 {
-		result["autonomous_system_number"] = mmdbtype.Uint32(a.Number)
+		result[keyASNumber] = mmdbtype.Uint32(a.Number)
 	}
 
 	if a.Organization != "" {
-		result["autonomous_system_organization"] = mmdbtype.String(a.Organization)
+		result[keyASOrg] = mmdbtype.String(interner.Intern(a.Organization))
 	}
 
 	if a.Domain != "" {
-		result["as_domain"] = mmdbtype.String(a.Domain)
+		result[keyASDomain] = mmdbtype.String(interner.Intern(a.Domain))
 	}
 
 	return result
