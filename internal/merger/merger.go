@@ -53,6 +53,7 @@ type Merger struct {
 	routeViewsASN   *reader.RouteViewsASNReader
 	geoWhoisCountry *reader.GeoWhoisCountryReader
 	qqwry           *reader.QQWryReader
+	openproxyDB     *reader.OpenproxyDBReader
 
 	tree *mmdbwriter.Tree
 
@@ -65,6 +66,7 @@ type Merger struct {
 	reusableGeoWhoisRecord    reader.GeoWhoisCountryRecord
 	reusableQQWryRecord       reader.QQWryRecord
 	reusableGeoLiteCityRecord reader.GeoLite2CityRecord
+	reusableOpenproxyDBRecord reader.OpenproxyDBRecord
 }
 
 // Stats holds merge statistics
@@ -77,6 +79,7 @@ type Stats struct {
 	RouteViewsASNHits   int64
 	GeoWhoisCountryHits int64
 	QQWryHits           int64
+	OpenproxyDBHits     int64
 	EmptyRecords        int64
 	ProcessedNetworks   int64
 }
@@ -137,6 +140,16 @@ func New() (*Merger, error) {
 	}
 	closers = append(closers, qqwry)
 
+	openproxyDB, err := reader.OpenOpenproxyDB()
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to open OpenProxyDB: %w", err)
+	}
+	closers = append(closers, openproxyDB)
+
+	singleIPs, cidrRanges := openproxyDB.Stats()
+	fmt.Printf("OpenProxyDB loaded: %d single IPs, %d CIDR ranges\n", singleIPs, cidrRanges)
+
 	tree, err := mmdbwriter.New(mmdbwriter.Options{
 		DatabaseType:            config.DatabaseType,
 		Description:             map[string]string{"en": config.DatabaseDescription},
@@ -159,6 +172,7 @@ func New() (*Merger, error) {
 		routeViewsASN:   routeViewsASN,
 		geoWhoisCountry: geoWhoisCountry,
 		qqwry:           qqwry,
+		openproxyDB:     openproxyDB,
 		tree:            tree,
 	}, nil
 }
@@ -199,6 +213,11 @@ func (m *Merger) Close() error {
 	}
 	if m.qqwry != nil {
 		if err := m.qqwry.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if m.openproxyDB != nil {
+		if err := m.openproxyDB.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -406,6 +425,7 @@ func (m *Merger) buildMergedRecord(network *net.IPNet, geoRecord *reader.GeoLite
 	m.enrichWithASNData(network.IP, record)
 	m.enrichWithCountryFallback(network.IP, record)
 	m.enrichWithQQWryData(network.IP, record)
+	m.enrichWithProxyData(network.IP, record)
 }
 
 // buildMergedRecordFromDBIP creates a merged record using DB-IP as primary geo source.
@@ -447,6 +467,7 @@ func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reade
 	m.enrichWithASNData(network.IP, record)
 	m.enrichWithCountryFallback(network.IP, record)
 	m.enrichWithQQWryData(network.IP, record)
+	m.enrichWithProxyData(network.IP, record)
 }
 
 // enrichWithCountryFallback adds country information from GeoWhois when country is missing
@@ -549,6 +570,25 @@ func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 	}
 }
 
+// enrichWithProxyData adds proxy/anonymity information from OpenProxyDB
+func (m *Merger) enrichWithProxyData(ip net.IP, record *MergedRecord) {
+	m.reusableOpenproxyDBRecord.Reset()
+	if !m.openproxyDB.LookupTo(ip, &m.reusableOpenproxyDBRecord) {
+		return
+	}
+
+	m.stats.OpenproxyDBHits++
+	record.Proxy = ProxyRecord{
+		IsProxy:     m.reusableOpenproxyDBRecord.IsProxy,
+		IsVPN:       m.reusableOpenproxyDBRecord.IsVPN,
+		IsTor:       m.reusableOpenproxyDBRecord.IsTor,
+		IsHosting:   m.reusableOpenproxyDBRecord.IsHosting,
+		IsCDN:       m.reusableOpenproxyDBRecord.IsCDN,
+		IsSchool:    m.reusableOpenproxyDBRecord.IsSchool,
+		IsAnonymous: m.reusableOpenproxyDBRecord.IsAnonymous,
+	}
+}
+
 // insertWithMerge inserts a record, merging with existing data if present
 func (m *Merger) insertWithMerge(network *net.IPNet, record *MergedRecord) error {
 	return m.tree.InsertFunc(network, func(existing mmdbtype.DataType) (mmdbtype.DataType, error) {
@@ -603,6 +643,7 @@ func (m *Merger) printStats() {
 	fmt.Printf("  DB-IP supplementary records: %d\n", m.stats.DBIPHits)
 	fmt.Printf("  GeoWhois Country fallback hits: %d\n", m.stats.GeoWhoisCountryHits)
 	fmt.Printf("  QQWry (Chunzhen) China enrichment hits: %d\n", m.stats.QQWryHits)
+	fmt.Printf("  OpenProxyDB proxy enrichment hits: %d\n", m.stats.OpenproxyDBHits)
 	fmt.Printf("  Empty records skipped: %d\n", m.stats.EmptyRecords)
 	fmt.Printf("  Final network count: %d\n", m.stats.ProcessedNetworks)
 }

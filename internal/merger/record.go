@@ -17,6 +17,7 @@ var (
 	keyRegisteredCountry = mmdbtype.String("registered_country")
 	keySubdivisions      = mmdbtype.String("subdivisions")
 	keyASN               = mmdbtype.String("asn")
+	keyProxy             = mmdbtype.String("proxy")
 	keyGeonameID         = mmdbtype.String("geoname_id")
 	keyNames             = mmdbtype.String("names")
 	keyCode              = mmdbtype.String("code")
@@ -29,6 +30,13 @@ var (
 	keyASNumber          = mmdbtype.String("autonomous_system_number")
 	keyASOrg             = mmdbtype.String("autonomous_system_organization")
 	keyASDomain          = mmdbtype.String("as_domain")
+	keyIsProxy           = mmdbtype.String("is_proxy")
+	keyIsVPN             = mmdbtype.String("is_vpn")
+	keyIsTor             = mmdbtype.String("is_tor")
+	keyIsHosting         = mmdbtype.String("is_hosting")
+	keyIsCDN             = mmdbtype.String("is_cdn")
+	keyIsSchool          = mmdbtype.String("is_school")
+	keyIsAnonymous       = mmdbtype.String("is_anonymous")
 )
 
 // MergedRecord represents the unified record structure for the output database.
@@ -42,6 +50,7 @@ type MergedRecord struct {
 	RegisteredCountry CountryRecord       `maxminddb:"registered_country"`
 	Subdivisions      []SubdivisionRecord `maxminddb:"subdivisions"`
 	ASN               ASNRecord           `maxminddb:"asn"`
+	Proxy             ProxyRecord         `maxminddb:"proxy"`
 }
 
 // CityRecord contains city information with multi-language support
@@ -93,6 +102,17 @@ type ASNRecord struct {
 	Domain       string `maxminddb:"as_domain"`
 }
 
+// ProxyRecord contains proxy/anonymity detection data from OpenProxyDB
+type ProxyRecord struct {
+	IsProxy     bool `maxminddb:"is_proxy"`
+	IsVPN       bool `maxminddb:"is_vpn"`
+	IsTor       bool `maxminddb:"is_tor"`
+	IsHosting   bool `maxminddb:"is_hosting"`
+	IsCDN       bool `maxminddb:"is_cdn"`
+	IsSchool    bool `maxminddb:"is_school"`
+	IsAnonymous bool `maxminddb:"is_anonymous"`
+}
+
 // ToMMDBType converts the MergedRecord to mmdbtype.Map for insertion into the database.
 // Only non-empty fields are included to minimize database size.
 func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
@@ -105,6 +125,7 @@ func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
 	regCountry := r.RegisteredCountry.toMMDBType()
 	subdivisions := r.subdivisionsToMMDBType()
 	asn := r.ASN.toMMDBType()
+	proxy := r.Proxy.toMMDBType()
 
 	// Count non-nil fields to allocate exact capacity
 	count := 0
@@ -130,6 +151,9 @@ func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
 		count++
 	}
 	if asn != nil {
+		count++
+	}
+	if proxy != nil {
 		count++
 	}
 
@@ -162,6 +186,9 @@ func (r *MergedRecord) ToMMDBType() mmdbtype.Map {
 	}
 	if asn != nil {
 		result[keyASN] = asn
+	}
+	if proxy != nil {
+		result[keyProxy] = proxy
 	}
 
 	return result
@@ -411,6 +438,61 @@ func (a *ASNRecord) toMMDBType() mmdbtype.Map {
 	return result
 }
 
+func (p *ProxyRecord) toMMDBType() mmdbtype.Map {
+	// Count non-empty fields first to avoid over-allocation
+	count := 0
+	if p.IsProxy {
+		count++
+	}
+	if p.IsVPN {
+		count++
+	}
+	if p.IsTor {
+		count++
+	}
+	if p.IsHosting {
+		count++
+	}
+	if p.IsCDN {
+		count++
+	}
+	if p.IsSchool {
+		count++
+	}
+	if p.IsAnonymous {
+		count++
+	}
+	if count == 0 {
+		return nil
+	}
+
+	result := make(mmdbtype.Map, count)
+
+	if p.IsProxy {
+		result[keyIsProxy] = mmdbtype.Bool(true)
+	}
+	if p.IsVPN {
+		result[keyIsVPN] = mmdbtype.Bool(true)
+	}
+	if p.IsTor {
+		result[keyIsTor] = mmdbtype.Bool(true)
+	}
+	if p.IsHosting {
+		result[keyIsHosting] = mmdbtype.Bool(true)
+	}
+	if p.IsCDN {
+		result[keyIsCDN] = mmdbtype.Bool(true)
+	}
+	if p.IsSchool {
+		result[keyIsSchool] = mmdbtype.Bool(true)
+	}
+	if p.IsAnonymous {
+		result[keyIsAnonymous] = mmdbtype.Bool(true)
+	}
+
+	return result
+}
+
 // IsEmpty checks if the record has no meaningful data
 func (r *MergedRecord) IsEmpty() bool {
 	return r.Country.ISOCode == "" &&
@@ -430,6 +512,7 @@ func (r *MergedRecord) Reset() {
 	r.RegisteredCountry = CountryRecord{}
 	r.Subdivisions = nil
 	r.ASN = ASNRecord{}
+	r.Proxy = ProxyRecord{}
 }
 
 // HasGeoData checks if the record has geographic data
