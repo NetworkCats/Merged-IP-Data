@@ -1,6 +1,7 @@
 package merger
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -329,6 +330,13 @@ func (m *Merger) processDBIPReader(r *reader.Reader) error {
 		}
 
 		if err := m.insertWithMerge(network, &record); err != nil {
+			// Silently skip reserved and aliased networks - these are expected
+			// when DB-IP data contains IANA special-purpose address ranges
+			var aliasedErr *mmdbwriter.AliasedNetworkError
+			var reservedErr *mmdbwriter.ReservedNetworkError
+			if errors.As(err, &aliasedErr) || errors.As(err, &reservedErr) {
+				continue
+			}
 			fmt.Printf("Warning: failed to insert DB-IP network %s: %v\n", network, err)
 			continue
 		}
