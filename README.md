@@ -79,7 +79,7 @@ The merged database contains the following fields:
 Download the latest merged database from [Releases](../../releases/latest):
 
 ```bash
-wget https://github.com/YOUR_USERNAME/Merged-IP-Data/releases/latest/download/Merged-IP.mmdb
+wget https://github.com/NetworkCats/Merged-IP-Data/releases/latest/download/Merged-IP.mmdb
 ```
 
 ## Building from Source
@@ -91,7 +91,7 @@ wget https://github.com/YOUR_USERNAME/Merged-IP-Data/releases/latest/download/Me
 ### Build
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/Merged-IP-Data.git
+git clone https://github.com/NetworkCats/Merged-IP-Data.git
 cd Merged-IP-Data
 go build -o merge-tool ./cmd/merge
 ```
