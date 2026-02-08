@@ -15,20 +15,6 @@ A Go program that merges multiple IP geolocation databases into a single, compre
 | [QQWry (Chunzhen)](https://github.com/metowolf/qqwry.ipdb) | Enhanced Chinese IP geolocation with native zh-CN names | IPv4 |
 | [OpenProxyDB](https://github.com/NetworkCats/OpenProxyDB) | Proxy, VPN, Tor, hosting, and CDN detection | IPv4 + IPv6 |
 
-## Merge Priority
-
-The merge logic uses a priority-based approach to select the most accurate data for each field:
-
-| Data Field | Priority 1 | Priority 2 | Priority 3 |
-|------------|------------|------------|------------|
-| Country | GeoLite2-City | DB-IP | GeoWhois-Country |
-| City, Coordinates | GeoLite2-City | DB-IP | - |
-| Timezone, Subdivisions | GeoLite2-City | DB-IP | - |
-| Multi-language Names | GeoLite2-City | QQWry (zh-CN for China) | - |
-| ASN, AS Organization | IPinfo Lite | GeoLite2-ASN | RouteViews ASN |
-| AS Domain | IPinfo Lite | - | - |
-| Proxy/Anonymity Data | OpenProxyDB | - | - |
-
 ## Output Format
 
 The merged database contains the following fields:
@@ -88,17 +74,6 @@ The merged database contains the following fields:
 }
 ```
 
-### Supported Languages
-
-- German (de)
-- English (en)
-- Spanish (es)
-- French (fr)
-- Japanese (ja)
-- Portuguese - Brazil (pt-BR)
-- Russian (ru)
-- Chinese - Simplified (zh-CN)
-
 ## Download
 
 Download the latest merged database from [Releases](../../releases/latest):
@@ -149,7 +124,6 @@ This project merges data from multiple sources. Please refer to each source's li
 - IPinfo Lite: [Creative Commons Attribution-ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-sa/4.0/)
 - DB-IP: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - RouteViews ASN: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
-- QQWry (Chunzhen): Public domain
 - OpenProxyDB: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
 
 The merge tool source code is provided as-is for educational and personal use.
