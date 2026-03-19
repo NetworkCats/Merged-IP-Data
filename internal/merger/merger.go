@@ -76,17 +76,18 @@ type Merger struct {
 
 // Stats holds merge statistics
 type Stats struct {
-	TotalNetworks       int64
-	GeoLiteCityHits     int64
-	GeoLiteASNHits      int64
-	IPinfoLiteHits      int64
-	DBIPHits            int64
-	RouteViewsASNHits   int64
-	GeoWhoisCountryHits int64
-	QQWryHits           int64
-	OpenproxyDBHits     int64
-	EmptyRecords        int64
-	ProcessedNetworks   int64
+	TotalNetworks          int64
+	GeoLiteCityHits        int64
+	GeoLiteASNHits         int64
+	IPinfoLiteHits         int64
+	DBIPHits               int64
+	RouteViewsASNHits      int64
+	GeoWhoisCountryHits    int64
+	QQWryHits              int64
+	OpenproxyDBHits        int64
+	EmptyRecords           int64
+	ProcessedNetworks      int64
+	SingleProxyIPsInserted int64
 }
 
 // New creates a new Merger instance
@@ -266,9 +267,15 @@ func (m *Merger) Merge() error {
 	}
 	logMemStats("After DB-IP")
 
+	fmt.Println("Processing single proxy IPs (direct /32 and /128 insertion)...")
+	if err := m.processSingleProxyIPs(); err != nil {
+		return fmt.Errorf("failed to process single proxy IPs: %w", err)
+	}
+	logMemStats("After Single Proxy IPs")
+
 	// Final GC before write phase
 	runtime.GC()
-	logMemStats("After GC (Phase 2)")
+	logMemStats("After GC (Phase 3)")
 
 	elapsed := time.Since(startTime)
 	fmt.Printf("Merge completed in %v\n", elapsed)
@@ -731,6 +738,86 @@ func (m *Merger) enrichWithProxyData(ip net.IP, record *MergedRecord) {
 	}
 }
 
+// processSingleProxyIPs directly inserts every single IP from OpenProxyDB and BadIPList
+// as /32 (IPv4) or /128 (IPv6) networks into the MMDB tree.
+// This ensures complete proxy coverage for individual IPs that would otherwise be missed
+// when only the network base address is checked during enrichment.
+// Uses InsertFunc to merge proxy flags with any existing geo/ASN data in the tree.
+func (m *Merger) processSingleProxyIPs() error {
+	singleIPs := m.openproxyDB.SingleIPs()
+	inserted := 0
+	skipped := 0
+
+	for addr, proxyRecord := range singleIPs {
+		// Build the proxy mmdbtype
+		proxy := ProxyRecord{
+			IsProxy:     proxyRecord.IsProxy,
+			IsVPN:       proxyRecord.IsVPN,
+			IsTor:       proxyRecord.IsTor,
+			IsHosting:   proxyRecord.IsHosting,
+			IsCDN:       proxyRecord.IsCDN,
+			IsSchool:    proxyRecord.IsSchool,
+			IsAnonymous: proxyRecord.IsAnonymous,
+		}
+		proxyMMDB := proxy.toMMDBType()
+		if proxyMMDB == nil {
+			skipped++
+			continue
+		}
+
+		// Convert netip.Addr to net.IP and build /32 or /128 network
+		ip := addr.AsSlice()
+		ones := 32
+		if addr.Is6() {
+			ones = 128
+		}
+		network := &net.IPNet{
+			IP:   ip,
+			Mask: net.CIDRMask(ones, ones),
+		}
+
+		// InsertFunc merges with any existing record in the tree
+		err := m.tree.InsertFunc(network, func(existing mmdbtype.DataType) (mmdbtype.DataType, error) {
+			if existing == nil {
+				// No existing record — insert proxy-only record
+				result := getMapFromPool(1)
+				result[keyProxy] = proxyMMDB
+				return result, nil
+			}
+
+			existingMap, ok := existing.(mmdbtype.Map)
+			if !ok {
+				result := getMapFromPool(1)
+				result[keyProxy] = proxyMMDB
+				return result, nil
+			}
+
+			// Merge: overwrite proxy key with our authoritative proxy data,
+			// preserving all existing geo/ASN fields
+			existingMap[keyProxy] = proxyMMDB
+			return existingMap, nil
+		})
+
+		if err != nil {
+			// Silently skip reserved and aliased networks — consistent with DB-IP phase
+			var aliasedErr *mmdbwriter.AliasedNetworkError
+			var reservedErr *mmdbwriter.ReservedNetworkError
+			if errors.As(err, &aliasedErr) || errors.As(err, &reservedErr) {
+				skipped++
+				continue
+			}
+			fmt.Printf("Warning: failed to insert single proxy IP %s: %v\n", addr, err)
+			skipped++
+			continue
+		}
+		inserted++
+	}
+
+	fmt.Printf("Single proxy IPs: %d inserted, %d skipped (of %d total)\n", inserted, skipped, len(singleIPs))
+	m.stats.SingleProxyIPsInserted = int64(inserted)
+	return nil
+}
+
 // insertWithMerge inserts a record, merging with existing data if present
 func (m *Merger) insertWithMerge(network *net.IPNet, record *MergedRecord) error {
 	return m.tree.InsertFunc(network, func(existing mmdbtype.DataType) (mmdbtype.DataType, error) {
@@ -786,6 +873,7 @@ func (m *Merger) printStats() {
 	fmt.Printf("  GeoWhois Country fallback hits: %d\n", m.stats.GeoWhoisCountryHits)
 	fmt.Printf("  QQWry (Chunzhen) China enrichment hits: %d\n", m.stats.QQWryHits)
 	fmt.Printf("  OpenProxyDB proxy enrichment hits: %d\n", m.stats.OpenproxyDBHits)
+	fmt.Printf("  Single proxy IPs inserted (/32, /128): %d\n", m.stats.SingleProxyIPsInserted)
 	fmt.Printf("  Empty records skipped: %d\n", m.stats.EmptyRecords)
 	fmt.Printf("  Final network count: %d\n", m.stats.ProcessedNetworks)
 }

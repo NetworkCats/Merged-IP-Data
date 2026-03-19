@@ -391,6 +391,13 @@ func (r *OpenproxyDBReader) LoadBadIPList(path string) (int, error) {
 	return count, nil
 }
 
+// SingleIPs returns the single IP map for direct iteration.
+// This allows the merger to insert each single IP as a /32 or /128 network
+// directly into the MMDB tree, ensuring complete proxy coverage.
+func (r *OpenproxyDBReader) SingleIPs() map[netip.Addr]OpenproxyDBRecord {
+	return r.singleIPs
+}
+
 // Stats returns the count of single IPs and CIDR ranges loaded
 func (r *OpenproxyDBReader) Stats() (singleCount, cidrCount int) {
 	return len(r.singleIPs), len(r.cidrRanges)
