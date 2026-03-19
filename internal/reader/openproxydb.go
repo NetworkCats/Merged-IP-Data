@@ -345,6 +345,52 @@ func (r *OpenproxyDBRecord) Reset() {
 	r.IsAnonymous = false
 }
 
+// LoadBadIPList reads a plain-text file of IPs (one per line) and merges them
+// into the single IP lookup map with IsProxy=true and IsAnonymous=true.
+// Existing OpenProxyDB records are preserved; only the proxy/anonymous flags
+// are ensured set for IPs that already exist.
+func (r *OpenproxyDBReader) LoadBadIPList(path string) (int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open bad IP list: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	count := 0
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		addr, err := netip.ParseAddr(line)
+		if err != nil {
+			continue
+		}
+
+		if existing, found := r.singleIPs[addr]; found {
+			// Merge: ensure proxy and anonymous flags are set
+			existing.IsProxy = true
+			existing.IsAnonymous = true
+			r.singleIPs[addr] = existing
+		} else {
+			r.singleIPs[addr] = OpenproxyDBRecord{
+				IsProxy:     true,
+				IsAnonymous: true,
+			}
+		}
+		count++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return count, fmt.Errorf("error reading bad IP list: %w", err)
+	}
+
+	return count, nil
+}
+
 // Stats returns the count of single IPs and CIDR ranges loaded
 func (r *OpenproxyDBReader) Stats() (singleCount, cidrCount int) {
 	return len(r.singleIPs), len(r.cidrRanges)

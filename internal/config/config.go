@@ -11,6 +11,7 @@ const (
 	GeoWhoisCountryURL = "https://cdn.jsdelivr.net/npm/@ip-location-db/geolite2-geo-whois-asn-country-mmdb/geolite2-geo-whois-asn-country.mmdb"
 	QQWryURL           = "https://cdn.jsdelivr.net/npm/qqwry.ipdb/qqwry.ipdb"
 	OpenproxyDBURL     = "https://github.com/NetworkCats/OpenProxyDB/releases/latest/download/proxy_blocks.csv"
+	BadIPListURL       = "https://github.com/NetworkCats/badiplist/releases/latest/download/badiplist.txt"
 )
 
 // Local file paths for downloaded databases
@@ -24,6 +25,7 @@ const (
 	GeoWhoisCountryFile = "download/geolite2-geo-whois-asn-country.mmdb"
 	QQWryFile           = "download/qqwry.ipdb"
 	OpenproxyDBFile     = "download/proxy_blocks.csv"
+	BadIPListFile       = "download/badiplist.txt"
 )
 
 // Output file path
@@ -76,5 +78,6 @@ func GetAllSources() []DatabaseSource {
 		{Name: "GeoWhois-Country", URL: GeoWhoisCountryURL, Path: GeoWhoisCountryFile},
 		{Name: "QQWry-Chunzhen", URL: QQWryURL, Path: QQWryFile},
 		{Name: "OpenProxyDB", URL: OpenproxyDBURL, Path: OpenproxyDBFile},
+		{Name: "BadIPList", URL: BadIPListURL, Path: BadIPListFile},
 	}
 }

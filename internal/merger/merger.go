@@ -155,6 +155,16 @@ func New() (*Merger, error) {
 	singleIPs, cidrRanges := openproxyDB.Stats()
 	fmt.Printf("OpenProxyDB loaded: %d single IPs, %d CIDR ranges\n", singleIPs, cidrRanges)
 
+	badIPCount, err := openproxyDB.LoadBadIPList(config.BadIPListFile)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to load BadIPList: %w", err)
+	}
+	fmt.Printf("BadIPList loaded: %d IPs merged into proxy data\n", badIPCount)
+
+	singleIPs, cidrRanges = openproxyDB.Stats()
+	fmt.Printf("OpenProxyDB total after merge: %d single IPs, %d CIDR ranges\n", singleIPs, cidrRanges)
+
 	tree, err := mmdbwriter.New(mmdbwriter.Options{
 		DatabaseType:            config.DatabaseType,
 		Description:             map[string]string{"en": config.DatabaseDescription},
