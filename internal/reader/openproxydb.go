@@ -3,6 +3,7 @@ package reader
 import (
 	"bufio"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -389,6 +390,157 @@ func (r *OpenproxyDBReader) LoadBadIPList(path string) (int, error) {
 	}
 
 	return count, nil
+}
+
+// LoadTorRelays reads the Onionoo JSON file of running Tor relays and merges
+// their IP addresses into the single IP lookup map with IsTor=true and
+// IsAnonymous=true. The JSON is expected to have been fetched with the
+// fields=or_addresses,exit_addresses parameter so that only address data is
+// present, keeping the download size manageable.
+//
+// or_addresses entries are in "ip:port" format (IPv6 in brackets, e.g.
+// "[2001:db8::1]:9001"), and exit_addresses entries are plain IP strings.
+// The method uses a streaming JSON decoder to handle large responses
+// efficiently without loading the entire array into memory at once.
+func (r *OpenproxyDBReader) LoadTorRelays(path string) (int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open Tor relays file: %w", err)
+	}
+	defer file.Close()
+
+	buffered := bufio.NewReaderSize(file, 256*1024)
+	decoder := json.NewDecoder(buffered)
+
+	// Read opening brace of top-level object
+	if _, err := decoder.Token(); err != nil {
+		return 0, fmt.Errorf("failed to read JSON start: %w", err)
+	}
+
+	uniqueIPs := make(map[netip.Addr]struct{})
+
+	// Stream through top-level keys until we find "relays"
+	for decoder.More() {
+		tok, err := decoder.Token()
+		if err != nil {
+			return 0, fmt.Errorf("failed to read JSON token: %w", err)
+		}
+
+		key, ok := tok.(string)
+		if !ok {
+			continue
+		}
+
+		if key == "relays" {
+			// Read opening bracket of relays array
+			if _, err := decoder.Token(); err != nil {
+				return 0, fmt.Errorf("failed to read relays array start: %w", err)
+			}
+
+			// Stream each relay object
+			var relay struct {
+				ORAddresses   []string `json:"or_addresses"`
+				ExitAddresses []string `json:"exit_addresses"`
+			}
+
+			for decoder.More() {
+				relay.ORAddresses = relay.ORAddresses[:0]
+				relay.ExitAddresses = relay.ExitAddresses[:0]
+
+				if err := decoder.Decode(&relay); err != nil {
+					continue
+				}
+
+				// Parse or_addresses: format is "ip:port" or "[ipv6]:port"
+				for _, orAddr := range relay.ORAddresses {
+					ip := parseTorORAddress(orAddr)
+					if ip.IsValid() {
+						uniqueIPs[ip] = struct{}{}
+					}
+				}
+
+				// Parse exit_addresses: plain IP strings
+				for _, exitAddr := range relay.ExitAddresses {
+					addr, err := netip.ParseAddr(strings.TrimSpace(exitAddr))
+					if err == nil {
+						uniqueIPs[addr.Unmap()] = struct{}{}
+					}
+				}
+			}
+
+			// Read closing bracket of relays array
+			if _, err := decoder.Token(); err != nil {
+				return 0, fmt.Errorf("failed to read relays array end: %w", err)
+			}
+		} else {
+			// Skip values for keys we don't care about (bridges, version, etc.)
+			// We need to consume the value so the decoder can advance
+			var skip json.RawMessage
+			if err := decoder.Decode(&skip); err != nil {
+				return 0, fmt.Errorf("failed to skip JSON value for key %q: %w", key, err)
+			}
+		}
+	}
+
+	// Merge unique IPs into the single IP map
+	count := 0
+	for addr := range uniqueIPs {
+		if existing, found := r.singleIPs[addr]; found {
+			// Merge: ensure Tor and anonymous flags are set
+			existing.IsTor = true
+			existing.IsAnonymous = true
+			r.singleIPs[addr] = existing
+		} else {
+			r.singleIPs[addr] = OpenproxyDBRecord{
+				IsTor:       true,
+				IsAnonymous: true,
+			}
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+// parseTorORAddress extracts the IP address from a Tor OR address string.
+// Formats: "1.2.3.4:9001" for IPv4, "[2001:db8::1]:9001" for IPv6.
+func parseTorORAddress(orAddr string) netip.Addr {
+	orAddr = strings.TrimSpace(orAddr)
+	if orAddr == "" {
+		return netip.Addr{}
+	}
+
+	// IPv6: "[addr]:port"
+	if strings.HasPrefix(orAddr, "[") {
+		bracketEnd := strings.LastIndex(orAddr, "]")
+		if bracketEnd < 0 {
+			return netip.Addr{}
+		}
+		ipStr := orAddr[1:bracketEnd]
+		addr, err := netip.ParseAddr(ipStr)
+		if err != nil {
+			return netip.Addr{}
+		}
+		return addr.Unmap()
+	}
+
+	// IPv4: "addr:port"
+	lastColon := strings.LastIndex(orAddr, ":")
+	if lastColon < 0 {
+		// No port — try parsing as plain IP
+		addr, err := netip.ParseAddr(orAddr)
+		if err != nil {
+			return netip.Addr{}
+		}
+		return addr.Unmap()
+	}
+
+	ipStr := orAddr[:lastColon]
+	addr, err := netip.ParseAddr(ipStr)
+	if err != nil {
+		return netip.Addr{}
+	}
+	return addr.Unmap()
 }
 
 // SingleIPs returns the single IP map for direct iteration.

@@ -163,6 +163,13 @@ func New() (*Merger, error) {
 	}
 	fmt.Printf("BadIPList loaded: %d IPs merged into proxy data\n", badIPCount)
 
+	torCount, err := openproxyDB.LoadTorRelays(config.TorRelaysFile)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to load Tor relays: %w", err)
+	}
+	fmt.Printf("Tor relays loaded: %d unique IPs merged into proxy data\n", torCount)
+
 	singleIPs, cidrRanges = openproxyDB.Stats()
 	fmt.Printf("OpenProxyDB total after merge: %d single IPs, %d CIDR ranges\n", singleIPs, cidrRanges)
 

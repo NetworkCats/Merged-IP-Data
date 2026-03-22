@@ -12,6 +12,7 @@ const (
 	QQWryURL           = "https://cdn.jsdelivr.net/npm/qqwry.ipdb/qqwry.ipdb"
 	OpenproxyDBURL     = "https://github.com/NetworkCats/OpenProxyDB/releases/latest/download/proxy_blocks.csv"
 	BadIPListURL       = "https://github.com/NetworkCats/badiplist/releases/latest/download/badiplist.txt"
+	TorRelaysURL       = "https://onionoo.torproject.org/details?type=relay&running=true&fields=or_addresses,exit_addresses"
 )
 
 // Local file paths for downloaded databases
@@ -26,6 +27,7 @@ const (
 	QQWryFile           = "download/qqwry.ipdb"
 	OpenproxyDBFile     = "download/proxy_blocks.csv"
 	BadIPListFile       = "download/badiplist.txt"
+	TorRelaysFile       = "download/tor_relays.json"
 )
 
 // Output file path
@@ -79,5 +81,6 @@ func GetAllSources() []DatabaseSource {
 		{Name: "QQWry-Chunzhen", URL: QQWryURL, Path: QQWryFile},
 		{Name: "OpenProxyDB", URL: OpenproxyDBURL, Path: OpenproxyDBFile},
 		{Name: "BadIPList", URL: BadIPListURL, Path: BadIPListFile},
+		{Name: "Tor-Relays", URL: TorRelaysURL, Path: TorRelaysFile},
 	}
 }
