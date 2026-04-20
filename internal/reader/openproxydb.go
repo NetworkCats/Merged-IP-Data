@@ -377,10 +377,20 @@ func (r *OpenproxyDBReader) LoadBadIPList(path string) (int, error) {
 			existing.IsAnonymous = true
 			r.singleIPs[addr] = existing
 		} else {
-			r.singleIPs[addr] = OpenproxyDBRecord{
+			rec := OpenproxyDBRecord{
 				IsProxy:     true,
 				IsAnonymous: true,
 			}
+			// Inherit any CIDR-level flags covering this IP (e.g. Hosting)
+			// so they coexist with the proxy flag on the /32 record.
+			if cidr, ok := r.findInCIDR(addr); ok {
+				rec.IsVPN = rec.IsVPN || cidr.IsVPN
+				rec.IsTor = rec.IsTor || cidr.IsTor
+				rec.IsHosting = rec.IsHosting || cidr.IsHosting
+				rec.IsCDN = rec.IsCDN || cidr.IsCDN
+				rec.IsSchool = rec.IsSchool || cidr.IsSchool
+			}
+			r.singleIPs[addr] = rec
 		}
 		count++
 	}
@@ -491,10 +501,21 @@ func (r *OpenproxyDBReader) LoadTorRelays(path string) (int, error) {
 			existing.IsAnonymous = true
 			r.singleIPs[addr] = existing
 		} else {
-			r.singleIPs[addr] = OpenproxyDBRecord{
+			rec := OpenproxyDBRecord{
 				IsTor:       true,
 				IsAnonymous: true,
 			}
+			// Inherit any CIDR-level flags covering this IP (e.g. Hosting,
+			// Proxy, VPN) so the Tor tag coexists with them on the /32 record
+			// rather than overriding them.
+			if cidr, ok := r.findInCIDR(addr); ok {
+				rec.IsProxy = rec.IsProxy || cidr.IsProxy
+				rec.IsVPN = rec.IsVPN || cidr.IsVPN
+				rec.IsHosting = rec.IsHosting || cidr.IsHosting
+				rec.IsCDN = rec.IsCDN || cidr.IsCDN
+				rec.IsSchool = rec.IsSchool || cidr.IsSchool
+			}
+			r.singleIPs[addr] = rec
 		}
 		count++
 	}

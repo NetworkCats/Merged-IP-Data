@@ -783,26 +783,28 @@ func (m *Merger) processSingleProxyIPs() error {
 			Mask: net.CIDRMask(ones, ones),
 		}
 
-		// InsertFunc merges with any existing record in the tree
+		// InsertFunc merges with any existing record in the tree.
+		// mmdbwriter shares DataType values across tree leaves for deduplication,
+		// so we must never mutate `existing` — always deep-copy first. We also
+		// union proxy flags with any pre-existing proxy map so e.g. Tor and
+		// Hosting coexist rather than one clobbering the other.
 		err := m.tree.InsertFunc(network, func(existing mmdbtype.DataType) (mmdbtype.DataType, error) {
 			if existing == nil {
-				// No existing record — insert proxy-only record
-				result := getMapFromPool(1)
-				result[keyProxy] = proxyMMDB
-				return result, nil
+				return mmdbtype.Map{keyProxy: proxyMMDB}, nil
 			}
 
 			existingMap, ok := existing.(mmdbtype.Map)
 			if !ok {
-				result := getMapFromPool(1)
-				result[keyProxy] = proxyMMDB
-				return result, nil
+				return mmdbtype.Map{keyProxy: proxyMMDB}, nil
 			}
 
-			// Merge: overwrite proxy key with our authoritative proxy data,
-			// preserving all existing geo/ASN fields
-			existingMap[keyProxy] = proxyMMDB
-			return existingMap, nil
+			copied := existingMap.Copy().(mmdbtype.Map)
+			if prev, hasPrev := copied[keyProxy].(mmdbtype.Map); hasPrev {
+				copied[keyProxy] = unionProxyMaps(prev, proxyMMDB)
+			} else {
+				copied[keyProxy] = proxyMMDB
+			}
+			return copied, nil
 		})
 
 		if err != nil {
@@ -856,6 +858,21 @@ func mergeMMDBMaps(existing, new mmdbtype.Map) mmdbtype.Map {
 		}
 	}
 
+	return result
+}
+
+// unionProxyMaps returns a fresh map containing the union of boolean flag keys
+// from a and b. Every value in the inputs is a mmdbtype.Bool(true) (the proxy
+// encoder omits false flags), so a key present in either map means "true".
+// Neither input is mutated.
+func unionProxyMaps(a, b mmdbtype.Map) mmdbtype.Map {
+	result := mmdbtype.Map{}
+	for k, v := range a {
+		result[k] = v
+	}
+	for k, v := range b {
+		result[k] = v
+	}
 	return result
 }
 
