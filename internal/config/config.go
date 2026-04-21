@@ -15,6 +15,7 @@ const (
 	TorRelaysURL       = "https://onionoo.torproject.org/details?type=relay&running=true&fields=or_addresses,exit_addresses"
 	AnycastV4URL       = "https://raw.githubusercontent.com/bgptools/anycast-prefixes/refs/heads/master/anycatch-v4-prefixes.txt"
 	AnycastV6URL       = "https://raw.githubusercontent.com/bgptools/anycast-prefixes/refs/heads/master/anycatch-v6-prefixes.txt"
+	BadASNListURL      = "https://raw.githubusercontent.com/brianhama/bad-asn-list/refs/heads/master/bad-asn-list.csv"
 )
 
 // Local file paths for downloaded databases
@@ -32,6 +33,7 @@ const (
 	TorRelaysFile       = "download/tor_relays.json"
 	AnycastV4File       = "download/anycast-v4.txt"
 	AnycastV6File       = "download/anycast-v6.txt"
+	BadASNListFile      = "download/bad-asn-list.csv"
 )
 
 // Output file path
@@ -88,5 +90,6 @@ func GetAllSources() []DatabaseSource {
 		{Name: "Tor-Relays", URL: TorRelaysURL, Path: TorRelaysFile},
 		{Name: "Anycast-V4", URL: AnycastV4URL, Path: AnycastV4File},
 		{Name: "Anycast-V6", URL: AnycastV6URL, Path: AnycastV6File},
+		{Name: "BadASNList", URL: BadASNListURL, Path: BadASNListFile},
 	}
 }

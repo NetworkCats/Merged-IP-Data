@@ -54,6 +54,7 @@ type Merger struct {
 	geoWhoisCountry *reader.GeoWhoisCountryReader
 	qqwry           *reader.QQWryReader
 	openproxyDB     *reader.OpenproxyDBReader
+	badASN          *reader.BadASNReader
 
 	tree *mmdbwriter.Tree
 
@@ -85,6 +86,7 @@ type Stats struct {
 	GeoWhoisCountryHits    int64
 	QQWryHits              int64
 	OpenproxyDBHits        int64
+	BadASNHits             int64
 	EmptyRecords           int64
 	ProcessedNetworks      int64
 	SingleProxyIPsInserted int64
@@ -153,6 +155,15 @@ func New() (*Merger, error) {
 	}
 	closers = append(closers, openproxyDB)
 
+	badASN, err := reader.OpenBadASNList(config.BadASNListFile)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to open bad ASN list: %w", err)
+	}
+	closers = append(closers, badASN)
+	fmt.Printf("Bad ASN list loaded: %d ASNs (includes %d manual entries)\n",
+		badASN.Count(), len(reader.ManuallyAddedBadASNs))
+
 	singleIPs, cidrRanges := openproxyDB.Stats()
 	fmt.Printf("OpenProxyDB loaded: %d single IPs, %d CIDR ranges\n", singleIPs, cidrRanges)
 
@@ -204,6 +215,7 @@ func New() (*Merger, error) {
 		geoWhoisCountry: geoWhoisCountry,
 		qqwry:           qqwry,
 		openproxyDB:     openproxyDB,
+		badASN:          badASN,
 		tree:            tree,
 	}, nil
 }
@@ -249,6 +261,11 @@ func (m *Merger) Close() error {
 	}
 	if m.openproxyDB != nil {
 		if err := m.openproxyDB.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if m.badASN != nil {
+		if err := m.badASN.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -357,6 +374,7 @@ func (m *Merger) processGeoLiteCityNetworksParallel(numWorkers int) error {
 		m.geoWhoisCountry,
 		m.qqwry,
 		m.openproxyDB,
+		m.badASN,
 	)
 
 	// Start workers
@@ -425,6 +443,7 @@ func (m *Merger) processGeoLiteCityNetworksParallel(numWorkers int) error {
 	m.stats.GeoWhoisCountryHits = workerStats.GeoWhoisCountryHits
 	m.stats.QQWryHits = workerStats.QQWryHits
 	m.stats.OpenproxyDBHits = workerStats.OpenproxyDBHits
+	m.stats.BadASNHits = workerStats.BadASNHits
 	m.stats.EmptyRecords = workerStats.EmptyRecords
 	m.stats.ProcessedNetworks = insertedCount
 
@@ -734,22 +753,31 @@ func (m *Merger) enrichWithASNData(ip net.IP, record *MergedRecord) {
 	m.cachedASNValid = true
 }
 
-// enrichWithProxyData adds proxy/anonymity information from OpenProxyDB
+// enrichWithProxyData adds proxy/anonymity information from OpenProxyDB, and
+// falls back to the bad ASN list when OpenProxyDB did not already flag the IP
+// as a proxy. Bad-ASN matches overlay IsProxy/IsHosting/IsAnonymous onto any
+// existing proxy record (e.g. a CDN-only entry) without clobbering other
+// flags such as IsCDN or IsTor.
 func (m *Merger) enrichWithProxyData(ip net.IP, record *MergedRecord) {
 	m.reusableOpenproxyDBRecord.Reset()
-	if !m.openproxyDB.LookupTo(ip, &m.reusableOpenproxyDBRecord) {
-		return
+	if m.openproxyDB.LookupTo(ip, &m.reusableOpenproxyDBRecord) {
+		m.stats.OpenproxyDBHits++
+		record.Proxy = ProxyRecord{
+			IsProxy:     m.reusableOpenproxyDBRecord.IsProxy,
+			IsVPN:       m.reusableOpenproxyDBRecord.IsVPN,
+			IsTor:       m.reusableOpenproxyDBRecord.IsTor,
+			IsHosting:   m.reusableOpenproxyDBRecord.IsHosting,
+			IsCDN:       m.reusableOpenproxyDBRecord.IsCDN,
+			IsSchool:    m.reusableOpenproxyDBRecord.IsSchool,
+			IsAnonymous: m.reusableOpenproxyDBRecord.IsAnonymous,
+		}
 	}
 
-	m.stats.OpenproxyDBHits++
-	record.Proxy = ProxyRecord{
-		IsProxy:     m.reusableOpenproxyDBRecord.IsProxy,
-		IsVPN:       m.reusableOpenproxyDBRecord.IsVPN,
-		IsTor:       m.reusableOpenproxyDBRecord.IsTor,
-		IsHosting:   m.reusableOpenproxyDBRecord.IsHosting,
-		IsCDN:       m.reusableOpenproxyDBRecord.IsCDN,
-		IsSchool:    m.reusableOpenproxyDBRecord.IsSchool,
-		IsAnonymous: m.reusableOpenproxyDBRecord.IsAnonymous,
+	if !record.Proxy.IsProxy && record.ASN.Number != 0 && m.badASN.Contains(record.ASN.Number) {
+		m.stats.BadASNHits++
+		record.Proxy.IsProxy = true
+		record.Proxy.IsHosting = true
+		record.Proxy.IsAnonymous = true
 	}
 }
 
@@ -905,6 +933,7 @@ func (m *Merger) printStats() {
 	fmt.Printf("  GeoWhois Country fallback hits: %d\n", m.stats.GeoWhoisCountryHits)
 	fmt.Printf("  QQWry (Chunzhen) China enrichment hits: %d\n", m.stats.QQWryHits)
 	fmt.Printf("  OpenProxyDB proxy enrichment hits: %d\n", m.stats.OpenproxyDBHits)
+	fmt.Printf("  Bad ASN fallback hits: %d\n", m.stats.BadASNHits)
 	fmt.Printf("  Single proxy IPs inserted (/32, /128): %d\n", m.stats.SingleProxyIPsInserted)
 	fmt.Printf("  Empty records skipped: %d\n", m.stats.EmptyRecords)
 	fmt.Printf("  Final network count: %d\n", m.stats.ProcessedNetworks)

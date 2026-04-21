@@ -33,6 +33,7 @@ type workerContext struct {
 	geoWhoisCountry *reader.GeoWhoisCountryReader
 	qqwry           *reader.QQWryReader
 	openproxyDB     *reader.OpenproxyDBReader
+	badASN          *reader.BadASNReader
 
 	// Per-worker reusable records (not shared between workers)
 	reusableIPinfoRecord     reader.IPinfoLiteRecord
@@ -61,6 +62,7 @@ type workerStats struct {
 	geoWhoisCountryHits int64
 	qqwryHits           int64
 	openproxyDBHits     int64
+	badASNHits          int64
 	emptyRecords        int64
 	processedNetworks   int64
 }
@@ -88,6 +90,7 @@ func newWorkerPool(
 	geoWhoisCountry *reader.GeoWhoisCountryReader,
 	qqwry *reader.QQWryReader,
 	openproxyDB *reader.OpenproxyDBReader,
+	badASN *reader.BadASNReader,
 ) *workerPool {
 	if numWorkers <= 0 {
 		numWorkers = runtime.NumCPU()
@@ -115,6 +118,7 @@ func newWorkerPool(
 			geoWhoisCountry: geoWhoisCountry,
 			qqwry:           qqwry,
 			openproxyDB:     openproxyDB,
+			badASN:          badASN,
 		}
 	}
 
@@ -167,6 +171,7 @@ func (p *workerPool) aggregateStats() Stats {
 		stats.GeoWhoisCountryHits += ctx.stats.geoWhoisCountryHits
 		stats.QQWryHits += ctx.stats.qqwryHits
 		stats.OpenproxyDBHits += ctx.stats.openproxyDBHits
+		stats.BadASNHits += ctx.stats.badASNHits
 		stats.EmptyRecords += ctx.stats.emptyRecords
 		stats.ProcessedNetworks += ctx.stats.processedNetworks
 	}
@@ -386,21 +391,29 @@ func (ctx *workerContext) enrichWithQQWryData(ip net.IP, record *MergedRecord) {
 	}
 }
 
-// enrichWithProxyData adds proxy/anonymity information from OpenProxyDB
+// enrichWithProxyData adds proxy/anonymity information from OpenProxyDB, with
+// a bad-ASN fallback: if OpenProxyDB did not flag the IP as a proxy but the
+// ASN resolved earlier is in the bad ASN list, overlay IsProxy/IsHosting/
+// IsAnonymous onto whatever proxy record is already present.
 func (ctx *workerContext) enrichWithProxyData(ip net.IP, record *MergedRecord) {
 	ctx.reusableOpenproxyRecord.Reset()
-	if !ctx.openproxyDB.LookupTo(ip, &ctx.reusableOpenproxyRecord) {
-		return
+	if ctx.openproxyDB.LookupTo(ip, &ctx.reusableOpenproxyRecord) {
+		ctx.stats.openproxyDBHits++
+		record.Proxy = ProxyRecord{
+			IsProxy:     ctx.reusableOpenproxyRecord.IsProxy,
+			IsVPN:       ctx.reusableOpenproxyRecord.IsVPN,
+			IsTor:       ctx.reusableOpenproxyRecord.IsTor,
+			IsHosting:   ctx.reusableOpenproxyRecord.IsHosting,
+			IsCDN:       ctx.reusableOpenproxyRecord.IsCDN,
+			IsSchool:    ctx.reusableOpenproxyRecord.IsSchool,
+			IsAnonymous: ctx.reusableOpenproxyRecord.IsAnonymous,
+		}
 	}
 
-	ctx.stats.openproxyDBHits++
-	record.Proxy = ProxyRecord{
-		IsProxy:     ctx.reusableOpenproxyRecord.IsProxy,
-		IsVPN:       ctx.reusableOpenproxyRecord.IsVPN,
-		IsTor:       ctx.reusableOpenproxyRecord.IsTor,
-		IsHosting:   ctx.reusableOpenproxyRecord.IsHosting,
-		IsCDN:       ctx.reusableOpenproxyRecord.IsCDN,
-		IsSchool:    ctx.reusableOpenproxyRecord.IsSchool,
-		IsAnonymous: ctx.reusableOpenproxyRecord.IsAnonymous,
+	if !record.Proxy.IsProxy && record.ASN.Number != 0 && ctx.badASN.Contains(record.ASN.Number) {
+		ctx.stats.badASNHits++
+		record.Proxy.IsProxy = true
+		record.Proxy.IsHosting = true
+		record.Proxy.IsAnonymous = true
 	}
 }
