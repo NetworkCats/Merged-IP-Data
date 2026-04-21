@@ -48,6 +48,12 @@ type OpenproxyDBReader struct {
 	// cidrRanges stores records sorted by prefix for binary search lookup
 	// after confirming containment via cidrSet
 	cidrRanges []cidrEntry
+
+	// anycastSet holds the union of bgp.tools anycast prefixes (v4 + v6).
+	// Any IP contained in this set gets IsCDN=true OR'd onto its OpenProxyDB
+	// record during lookup so the CDN tag coexists with any existing tags
+	// (Hosting, Proxy, VPN, Tor, ...) rather than overriding them.
+	anycastSet *netipx.IPSet
 }
 
 // OpenOpenproxyDB opens and parses the OpenProxyDB CSV file
@@ -225,19 +231,28 @@ func (r *OpenproxyDBReader) LookupTo(ip net.IP, record *OpenproxyDBRecord) bool 
 	}
 	addr = addr.Unmap()
 
+	found := false
+
 	// Priority 1: Check single IP map first (single IPs take priority)
-	if rec, found := r.singleIPs[addr]; found {
+	if rec, ok := r.singleIPs[addr]; ok {
 		*record = rec
-		return true
+		found = true
+	} else if rec, ok := r.findInCIDR(addr); ok {
+		// Priority 2: Search CIDR ranges (find most specific match)
+		*record = rec
+		found = true
 	}
 
-	// Priority 2: Search CIDR ranges (find most specific match)
-	if rec, found := r.findInCIDR(addr); found {
-		*record = rec
-		return true
+	// Overlay: bgp.tools anycast prefixes always contribute IsCDN=true on
+	// top of any existing OpenProxyDB tags. This lets CDN coexist with
+	// Hosting/Proxy/VPN/Tor rather than being shadowed when a more-specific
+	// OpenProxyDB CIDR match would otherwise omit the CDN flag.
+	if r.anycastSet != nil && r.anycastSet.Contains(addr) {
+		record.IsCDN = true
+		found = true
 	}
 
-	return false
+	return found
 }
 
 // findInCIDR searches for the most specific CIDR match for the given address.
@@ -569,6 +584,100 @@ func parseTorORAddress(orAddr string) netip.Addr {
 // directly into the MMDB tree, ensuring complete proxy coverage.
 func (r *OpenproxyDBReader) SingleIPs() map[netip.Addr]OpenproxyDBRecord {
 	return r.singleIPs
+}
+
+// LoadAnycastPrefixes reads one or more plain-text CIDR prefix list files (as
+// published by bgp.tools anycast-prefixes) and builds the anycast lookup set.
+// Blank lines and '#'-prefixed comments are skipped. Bare IP addresses are
+// treated as /32 or /128 prefixes. Call this after any LoadBadIPList or
+// LoadTorRelays calls so the sweep at the end picks up every single-IP entry.
+//
+// After the set is built, every single-IP record that falls inside an anycast
+// prefix has IsCDN OR'd true in place so the merger's direct /32 and /128
+// insertion path carries the CDN flag alongside the existing tags. CIDR-level
+// lookups pick up the CDN overlay automatically via LookupTo.
+func (r *OpenproxyDBReader) LoadAnycastPrefixes(paths ...string) (int, error) {
+	var builder netipx.IPSetBuilder
+	loaded := 0
+
+	for _, path := range paths {
+		n, err := r.parseAnycastFile(path, &builder)
+		if err != nil {
+			return loaded, err
+		}
+		loaded += n
+	}
+
+	if loaded == 0 {
+		return 0, nil
+	}
+
+	ipSet, err := builder.IPSet()
+	if err != nil {
+		return loaded, fmt.Errorf("failed to build anycast IPSet: %w", err)
+	}
+	r.anycastSet = ipSet
+
+	for addr, rec := range r.singleIPs {
+		if !rec.IsCDN && ipSet.Contains(addr) {
+			rec.IsCDN = true
+			r.singleIPs[addr] = rec
+		}
+	}
+
+	return loaded, nil
+}
+
+// parseAnycastFile reads a single prefix-list file and adds each entry to the
+// supplied builder. Returns the number of prefixes successfully added.
+func (r *OpenproxyDBReader) parseAnycastFile(path string, builder *netipx.IPSetBuilder) (int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open anycast prefix file %s: %w", path, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	count := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		prefix, err := netip.ParsePrefix(line)
+		if err != nil {
+			addr, addrErr := netip.ParseAddr(line)
+			if addrErr != nil {
+				continue
+			}
+			bits := 32
+			if addr.Is6() {
+				bits = 128
+			}
+			prefix = netip.PrefixFrom(addr, bits)
+		}
+
+		builder.AddPrefix(prefix)
+		count++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return count, fmt.Errorf("error reading anycast prefix file %s: %w", path, err)
+	}
+
+	return count, nil
+}
+
+// AnycastPrefixCount returns the number of anycast prefixes currently loaded.
+// Returns 0 if no anycast set has been built.
+func (r *OpenproxyDBReader) AnycastPrefixCount() int {
+	if r.anycastSet == nil {
+		return 0
+	}
+	return len(r.anycastSet.Prefixes())
 }
 
 // Stats returns the count of single IPs and CIDR ranges loaded

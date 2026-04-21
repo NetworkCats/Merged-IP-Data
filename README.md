@@ -14,6 +14,7 @@ A Go program that merges multiple IP geolocation databases into a single, compre
 | [GeoLite2-Geo-Whois-ASN-Country](https://www.npmjs.com/package/@ip-location-db/geolite2-geo-whois-asn-country-mmdb) | Country fallback | IPv4 + IPv6 |
 | [QQWry (Chunzhen)](https://github.com/metowolf/qqwry.ipdb) | Enhanced Chinese IP geolocation with native zh-CN names | IPv4 |
 | [OpenProxyDB](https://github.com/NetworkCats/OpenProxyDB) | Proxy, VPN, Tor, hosting, and CDN detection | IPv4 + IPv6 |
+| [bgp.tools Anycast](https://github.com/bgptools/anycast-prefixes) | CDN overlay for anycast prefixes (OR'd into `is_cdn`) | IPv4 + IPv6 |
 
 ## Output Format
 

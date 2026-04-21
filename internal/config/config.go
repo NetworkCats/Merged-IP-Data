@@ -13,6 +13,8 @@ const (
 	OpenproxyDBURL     = "https://github.com/NetworkCats/OpenProxyDB/releases/latest/download/proxy_blocks.csv"
 	BadIPListURL       = "https://github.com/NetworkCats/badiplist/releases/latest/download/badiplist.txt"
 	TorRelaysURL       = "https://onionoo.torproject.org/details?type=relay&running=true&fields=or_addresses,exit_addresses"
+	AnycastV4URL       = "https://raw.githubusercontent.com/bgptools/anycast-prefixes/refs/heads/master/anycatch-v4-prefixes.txt"
+	AnycastV6URL       = "https://raw.githubusercontent.com/bgptools/anycast-prefixes/refs/heads/master/anycatch-v6-prefixes.txt"
 )
 
 // Local file paths for downloaded databases
@@ -28,6 +30,8 @@ const (
 	OpenproxyDBFile     = "download/proxy_blocks.csv"
 	BadIPListFile       = "download/badiplist.txt"
 	TorRelaysFile       = "download/tor_relays.json"
+	AnycastV4File       = "download/anycast-v4.txt"
+	AnycastV6File       = "download/anycast-v6.txt"
 )
 
 // Output file path
@@ -82,5 +86,7 @@ func GetAllSources() []DatabaseSource {
 		{Name: "OpenProxyDB", URL: OpenproxyDBURL, Path: OpenproxyDBFile},
 		{Name: "BadIPList", URL: BadIPListURL, Path: BadIPListFile},
 		{Name: "Tor-Relays", URL: TorRelaysURL, Path: TorRelaysFile},
+		{Name: "Anycast-V4", URL: AnycastV4URL, Path: AnycastV4File},
+		{Name: "Anycast-V6", URL: AnycastV6URL, Path: AnycastV6File},
 	}
 }

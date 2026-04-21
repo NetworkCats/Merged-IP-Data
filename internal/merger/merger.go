@@ -170,6 +170,14 @@ func New() (*Merger, error) {
 	}
 	fmt.Printf("Tor relays loaded: %d unique IPs merged into proxy data\n", torCount)
 
+	anycastCount, err := openproxyDB.LoadAnycastPrefixes(config.AnycastV4File, config.AnycastV6File)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to load anycast prefixes: %w", err)
+	}
+	fmt.Printf("Anycast prefixes loaded: %d entries (%d in lookup set) — CDN overlay active\n",
+		anycastCount, openproxyDB.AnycastPrefixCount())
+
 	singleIPs, cidrRanges = openproxyDB.Stats()
 	fmt.Printf("OpenProxyDB total after merge: %d single IPs, %d CIDR ranges\n", singleIPs, cidrRanges)
 
