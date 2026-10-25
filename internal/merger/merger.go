@@ -20,7 +20,6 @@ import (
 	"go4.org/netipx"
 )
 
-const maxMergeWorkers = 8
 const mergeGCPercent = 75
 
 // tuneMergeGC lowers the default heap-growth target during the memory-heavy
@@ -44,17 +43,6 @@ func logMemStats(phase string) {
 		m.TotalAlloc/1024/1024,
 		m.Sys/1024/1024,
 		m.NumGC)
-}
-
-func mergeWorkerCount() int {
-	numWorkers := runtime.GOMAXPROCS(0)
-	if numWorkers < 1 {
-		return 1
-	}
-	if numWorkers > maxMergeWorkers {
-		return maxMergeWorkers
-	}
-	return numWorkers
 }
 
 // closerList holds a list of io.Closers for cleanup
@@ -93,6 +81,10 @@ type Merger struct {
 	// Effective GeoLite networks with primary city/country data, coalesced into
 	// sorted ranges for efficient DB-IP gap processing.
 	geoPrimaryRanges []netipx.IPRange
+
+	// Shared nested values of GeoLite2-City and DB-IP records, kept only
+	// while those sources are processed.
+	shared *sharedValues
 
 	// Reusable records for point-lookup sources that do not expose iterable
 	// boundaries suitable for the merge.
@@ -282,6 +274,7 @@ func New() (*Merger, error) {
 		RecordSize:              28,
 		IncludeReservedNetworks: false,
 		DisableIPv4Aliasing:     false,
+		KeyGenerator:            &treeKeyGenerator{},
 	})
 	if err != nil {
 		cleanup()
@@ -379,9 +372,10 @@ func (m *Merger) Merge() error {
 	}
 	logMemStats("After ASN networks")
 
-	numWorkers := mergeWorkerCount()
-	fmt.Printf("Processing GeoLite2-City networks (primary source) with %d workers...\n", numWorkers)
-	if err := m.processGeoLiteCityNetworksParallel(numWorkers); err != nil {
+	m.shared = newSharedValues()
+
+	fmt.Println("Processing GeoLite2-City networks (primary source)...")
+	if err := m.processGeoLiteCityNetworks(); err != nil {
 		return fmt.Errorf("failed to process GeoLite2-City: %w", err)
 	}
 	logMemStats("After GeoLite2-City")
@@ -395,6 +389,7 @@ func (m *Merger) Merge() error {
 		return fmt.Errorf("failed to process DB-IP: %w", err)
 	}
 	m.geoPrimaryRanges = nil
+	m.shared = nil
 	logMemStats("After DB-IP")
 
 	// DB-IP merges create many short-lived maps while the long-lived tree is
@@ -459,105 +454,6 @@ func (m *Merger) Merge() error {
 	return nil
 }
 
-// processGeoLiteCityNetworksParallel processes GeoLite2-City networks using parallel workers.
-// This significantly speeds up processing on multi-core systems by:
-// 1. Reading networks from GeoLite2-City sequentially (iterator is not thread-safe)
-// 2. Processing country enrichment and record encoding in parallel
-// 3. Inserting results into the tree sequentially (tree is not thread-safe)
-func (m *Merger) processGeoLiteCityNetworksParallel(numWorkers int) error {
-	// Create worker pool
-	pool := newWorkerPool(
-		numWorkers,
-		m.geoWhoisCountry,
-	)
-
-	// Start workers
-	pool.start()
-
-	// Start result consumer in a separate goroutine
-	var insertErr error
-	var insertedCount int64
-	insertDone := make(chan struct{})
-
-	go func() {
-		defer close(insertDone)
-		for result := range pool.results() {
-			if err := m.insertMMDBMapWithMerge(result.network, result.mmdbRecord); err != nil {
-				if isSkippableInsertError(err) {
-					continue
-				}
-				if insertErr == nil {
-					insertErr = fmt.Errorf("failed to insert network %s: %w", result.network, err)
-				}
-				fmt.Printf("Warning: failed to insert network %s: %v\n", result.network, err)
-				continue
-			}
-			insertedCount++
-			if insertedCount%100000 == 0 {
-				fmt.Printf("  Inserted %d networks...\n", insertedCount)
-			}
-		}
-	}()
-
-	// Read networks and submit to worker pool
-	networks := m.geoLiteCity.Networks()
-	var decodeErr error
-	primaryRanges := make([]netipx.IPRange, 0, 4096)
-	for networks.Next() {
-		var geoRecord reader.GeoLite2CityRecord
-		network, err := networks.Network(&geoRecord)
-		if err != nil {
-			decodeErr = fmt.Errorf("failed to read GeoLite2-City network: %w", err)
-			break
-		}
-		if geoRecord.HasPrimaryGeoData() {
-			prefix, ok := netipx.FromStdIPNet(network)
-			if !ok {
-				decodeErr = fmt.Errorf("invalid GeoLite2-City network %s", network)
-				break
-			}
-			primaryRanges = appendCoalescedIPRange(primaryRanges, netipx.RangeOfPrefix(prefix))
-		}
-
-		pool.submit(workItem{
-			network:   network,
-			geoRecord: geoRecord,
-		})
-	}
-
-	// Signal no more work
-	pool.closeWork()
-
-	// Wait for all workers to finish
-	pool.wait()
-
-	// Wait for all insertions to complete
-	<-insertDone
-
-	// Check for iterator errors
-	if err := networks.Err(); err != nil {
-		return err
-	}
-	if decodeErr != nil {
-		return decodeErr
-	}
-	m.geoPrimaryRanges = primaryRanges
-
-	if insertErr != nil {
-		return insertErr
-	}
-
-	// Aggregate statistics from workers
-	workerStats := pool.aggregateStats()
-	m.stats.TotalNetworks = workerStats.TotalNetworks
-	m.stats.GeoLiteCityHits = workerStats.GeoLiteCityHits
-	m.stats.GeoWhoisCountryHits = workerStats.GeoWhoisCountryHits
-	m.stats.EmptyRecords = workerStats.EmptyRecords
-	m.stats.ProcessedNetworks = insertedCount
-
-	return nil
-}
-
 // processDBIPNetworks processes DB-IP networks for IPs not covered by GeoLite2
 func (m *Merger) processDBIPNetworks() error {
 	if err := m.processDBIPReader(m.dbipCity.IPv4Reader()); err != nil {
@@ -567,19 +463,47 @@ func (m *Merger) processDBIPNetworks() error {
 }
 
 func (m *Merger) processDBIPReader(r *reader.Reader) error {
+	records := make(map[sourceRecordKey]sourceRecord)
+	var dbipRecord reader.DBIPCityRecord
+	var merged MergedRecord
+	record := func(key sourceRecordKey) (sourceRecord, error) {
+		if cached, ok := records[key]; ok {
+			return cached, nil
+		}
+		dbipRecord.Reset()
+		if err := r.Decode(key.offset, &dbipRecord); err != nil {
+			return sourceRecord{}, err
+		}
+		merged.Reset()
+		mergedRecordFromDBIP(&dbipRecord, &merged)
+		cached := sourceRecord{
+			hasGeo:     dbipRecord.HasGeoData(),
+			hasCountry: merged.Country.ISOCode != "",
+		}
+		if !cached.hasCountry {
+			merged.Country.ISOCode = key.country
+		}
+		if !merged.IsEmpty() {
+			cached.value = merged.ToMMDBType()
+			if err := m.shared.shareFields(cached.value); err != nil {
+				return sourceRecord{}, err
+			}
+		}
+		records[key] = cached
+		return cached, nil
+	}
+
 	networks := r.Networks()
-
-	// Reuse a single record to reduce allocations
-	var record MergedRecord
-
 	for networks.Next() {
-		var dbipRecord reader.DBIPCityRecord
-		network, err := networks.Network(&dbipRecord)
+		network, offset, err := reader.NetworkOffset(networks)
 		if err != nil {
 			return fmt.Errorf("failed to read DB-IP network: %w", err)
 		}
-
-		if !dbipRecord.HasGeoData() {
+		source, err := record(sourceRecordKey{offset: offset})
+		if err != nil {
+			return fmt.Errorf("failed to decode DB-IP network %s: %w", network, err)
+		}
+		if !source.hasGeo {
 			continue
 		}
 
@@ -589,13 +513,21 @@ func (m *Merger) processDBIPReader(r *reader.Reader) error {
 				continue
 			}
 			m.stats.TotalNetworks++
-			record.Reset()
-			m.buildMergedRecordFromDBIP(uncovered, &dbipRecord, &record)
-			if record.IsEmpty() {
+			value := source.value
+			if !source.hasCountry {
+				if country := m.fallbackCountry(uncovered.IP); country != "" {
+					withCountry, err := record(sourceRecordKey{offset: offset, country: country})
+					if err != nil {
+						return fmt.Errorf("failed to decode DB-IP network %s: %w", network, err)
+					}
+					value = withCountry.value
+				}
+			}
+			if value == nil {
 				m.stats.EmptyRecords++
 				continue
 			}
-			if err := m.insertWithMerge(uncovered, &record); err != nil {
+			if err := m.insertMMDBMapWithMerge(uncovered, value); err != nil {
 				if isSkippableInsertError(err) {
 					continue
 				}
@@ -605,8 +537,11 @@ func (m *Merger) processDBIPReader(r *reader.Reader) error {
 			m.stats.ProcessedNetworks++
 		}
 	}
-
-	return networks.Err()
+	if err := networks.Err(); err != nil {
+		return err
+	}
+	fmt.Printf("  DB-IP: %d distinct records\n", len(records))
+	return nil
 }
 
 func appendCoalescedIPRange(ranges []netipx.IPRange, next netipx.IPRange) []netipx.IPRange {
@@ -670,9 +605,9 @@ func networkContains(outer, inner *net.IPNet) bool {
 		outerOnes <= innerOnes && outer.Contains(inner.IP)
 }
 
-// buildMergedRecordFromDBIP creates a merged record using DB-IP as primary geo source.
-// The record parameter should be pre-reset before calling this function.
-func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reader.DBIPCityRecord, record *MergedRecord) {
+// mergedRecordFromDBIP fills record with DB-IP as the primary geo source.
+// The record should be reset before calling this function.
+func mergedRecordFromDBIP(dbipRecord *reader.DBIPCityRecord, record *MergedRecord) {
 	if dbipRecord.HasGeoData() {
 		if dbipRecord.City != "" {
 			record.City = CityRecord{
@@ -706,8 +641,6 @@ func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reade
 			record.Subdivisions = subdivisionsFromDBIP(dbipRecord)
 		}
 	}
-
-	m.enrichWithCountryFallback(network.IP, record)
 }
 
 func subdivisionsFromDBIP(record *reader.DBIPCityRecord) []SubdivisionRecord {
@@ -722,18 +655,29 @@ func subdivisionsFromDBIP(record *reader.DBIPCityRecord) []SubdivisionRecord {
 }
 
 func (m *Merger) processCountryFallbackNetworks() error {
+	// The database has only a few hundred distinct records, one per country.
+	fallbacks := make(map[uintptr]mmdbtype.Map)
 	networks := m.geoWhoisCountry.Networks()
 	processed, changed, skipped := 0, 0, 0
 	for networks.Next() {
-		var source reader.GeoWhoisCountryRecord
-		network, err := networks.Network(&source)
+		network, offset, err := reader.NetworkOffset(networks)
 		if err != nil {
 			return fmt.Errorf("failed to read GeoLite2 Country network: %w", err)
 		}
-		if !source.HasCountry() {
+		fallback, ok := fallbacks[offset]
+		if !ok {
+			var source reader.GeoWhoisCountryRecord
+			if err := m.geoWhoisCountry.Decode(offset, &source); err != nil {
+				return fmt.Errorf("failed to decode GeoLite2 Country network %s: %w", network, err)
+			}
+			if source.HasCountry() {
+				fallback = (&MergedRecord{Country: CountryRecord{ISOCode: source.CountryCode}}).ToMMDBType()
+			}
+			fallbacks[offset] = fallback
+		}
+		if fallback == nil {
 			continue
 		}
-		fallback := (&MergedRecord{Country: CountryRecord{ISOCode: source.CountryCode}}).ToMMDBType()
 		didChange, err := m.insertMMDBMapWithMergeTracked(network, fallback)
 		if err != nil {
 			if isSkippableInsertError(err) {
@@ -753,19 +697,6 @@ func (m *Merger) processCountryFallbackNetworks() error {
 	m.stats.GeoWhoisCountryHits += int64(changed)
 	fmt.Printf("GeoLite2 Country fallback networks: %d processed, %d changed, %d skipped\n", processed, changed, skipped)
 	return nil
-}
-
-// enrichWithCountryFallback adds country information from GeoLite2 Country when country is missing.
-func (m *Merger) enrichWithCountryFallback(ip net.IP, record *MergedRecord) {
-	if record.Country.ISOCode != "" {
-		return
-	}
-
-	m.reusableGeoWhoisRecord.Reset()
-	if err := m.geoWhoisCountry.LookupTo(ip, &m.reusableGeoWhoisRecord); err == nil && m.reusableGeoWhoisRecord.HasCountry() {
-		m.stats.GeoWhoisCountryHits++
-		record.Country.ISOCode = m.reusableGeoWhoisRecord.CountryCode
-	}
 }
 
 func applyASNProxyOverlay(record *MergedRecord, asnOverlay *reader.ASNOverlayReader) bool {
@@ -1284,11 +1215,6 @@ func isSkippableInsertError(err error) bool {
 	var aliasedErr *mmdbwriter.AliasedNetworkError
 	var reservedErr *mmdbwriter.ReservedNetworkError
 	return errors.As(err, &aliasedErr) || errors.As(err, &reservedErr)
-}
-
-// insertWithMerge inserts a record, merging with existing data if present
-func (m *Merger) insertWithMerge(network *net.IPNet, record *MergedRecord) error {
-	return m.insertMMDBMapWithMerge(network, record.ToMMDBType())
 }
 
 func (m *Merger) insertMMDBMapWithMerge(network *net.IPNet, newMap mmdbtype.Map) error {

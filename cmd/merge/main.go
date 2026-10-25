@@ -78,10 +78,14 @@ func mergeDatabases(outputPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create merger: %w", err)
 	}
-	defer m.Close()
-
-	if err := m.Merge(); err != nil {
-		return fmt.Errorf("failed to merge databases: %w", err)
+	mergeErr := m.Merge()
+	// The tree no longer needs the source readers; release them before the
+	// write phase, which is when memory use peaks.
+	if err := m.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+	if mergeErr != nil {
+		return fmt.Errorf("failed to merge databases: %w", mergeErr)
 	}
 
 	fmt.Println("\n=== Writing Output ===")
