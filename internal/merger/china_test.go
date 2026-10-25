@@ -19,8 +19,21 @@ func TestChinaDictionaryIsComplete(t *testing.T) {
 			if city.En == "" || city.GeonameID == 0 {
 				t.Fatalf("city %s/%s is incomplete: %#v", province, name, city)
 			}
-			if city.Latitude < 18 || city.Latitude > 54 || city.Longitude < 73 || city.Longitude > 135 {
+			if city.Latitude < 3 || city.Latitude > 54 || city.Longitude < 73 || city.Longitude > 135 {
 				t.Fatalf("city %s/%s has coordinates outside China: %#v", province, name, city)
+			}
+		}
+	}
+}
+
+func TestChinaCityAliasesPointAtDictionary(t *testing.T) {
+	for province, aliases := range chinaCityAliases {
+		for alias, canonical := range aliases {
+			if _, ok := chinaCities[province][canonical]; !ok {
+				t.Fatalf("alias %s/%s points at unknown city %q", province, alias, canonical)
+			}
+			if _, ok := chinaCities[province][alias]; ok {
+				t.Fatalf("alias %s/%s shadows a dictionary city", province, alias)
 			}
 		}
 	}
@@ -42,6 +55,11 @@ func TestResolveChinaLocation(t *testing.T) {
 		{"新疆乌鲁木齐", "", "Xinjiang", "Urumqi", "乌鲁木齐"},
 		{"浙江", "", "Zhejiang", "", ""},
 		{"广西", "柳州高新区", "Guangxi", "Liuzhou", "柳州"},
+		{"吉林延边", "", "Jilin", "Yanbian", "延边朝鲜族自治州"},
+		{"新疆省伊犁州", "", "Xinjiang", "Ili", "伊犁哈萨克自治州"},
+		{"云南迪庆市香格里拉市", "", "Yunnan", "Diqing", "迪庆藏族自治州"},
+		{"江苏昆山市", "", "Jiangsu", "Suzhou", "苏州"},
+		{"海南", "三沙", "Hainan", "Sansha", "三沙"},
 	}
 	for _, tt := range tests {
 		loc := resolveChinaLocation(tt.region, tt.city)

@@ -43,9 +43,10 @@ func resolveChinaLocation(region, city string) *chinaLocation {
 		return nil
 	}
 	province := chinaProvinces[provinceName]
-	// QQWry sometimes packs the city into the region, e.g. "新疆乌鲁木齐".
+	// QQWry sometimes packs the city into the region, e.g. "新疆乌鲁木齐"
+	// or "新疆省伊犁州".
 	if city == "" {
-		city = rest
+		city = strings.TrimPrefix(rest, "省")
 	}
 	if city == "" && chinaMunicipalities[provinceName] {
 		city = provinceName
@@ -87,19 +88,27 @@ func matchChinaProvince(region string) (string, string) {
 }
 
 // matchChinaCity finds the dictionary city for QQWry's city name. Besides exact
-// names it accepts a redundant "市" suffix and a trailing district or street
-// ("青岛胶南市" -> "青岛").
+// names it accepts a redundant "市" suffix, the aliases in chinaCityAliases and
+// a trailing district or street ("青岛胶南市" -> "青岛").
 func matchChinaCity(province, city string) (string, bool) {
 	if city == "" {
 		return "", false
 	}
 	cities := chinaCities[province]
-	if _, ok := cities[city]; ok {
-		return city, true
+	aliases := chinaCityAliases[province]
+	lookup := func(name string) (string, bool) {
+		if _, ok := cities[name]; ok {
+			return name, true
+		}
+		canonical, ok := aliases[name]
+		return canonical, ok
+	}
+	if name, ok := lookup(city); ok {
+		return name, true
 	}
 	if trimmed := strings.TrimSuffix(city, "市"); trimmed != city {
-		if _, ok := cities[trimmed]; ok {
-			return trimmed, true
+		if name, ok := lookup(trimmed); ok {
+			return name, true
 		}
 	}
 	best := ""
@@ -108,7 +117,15 @@ func matchChinaCity(province, city string) (string, bool) {
 			best = name
 		}
 	}
-	return best, best != ""
+	for alias := range aliases {
+		if len(alias) > len(best) && strings.HasPrefix(city, alias) {
+			best = alias
+		}
+	}
+	if best == "" {
+		return "", false
+	}
+	return lookup(best)
 }
 
 func chinaPlaceMap(geonameID uint32, isoCode, en, zh string) mmdbtype.Map {
