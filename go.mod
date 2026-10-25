@@ -4,11 +4,8 @@ go 1.26.0
 
 require (
 	github.com/maxmind/mmdbwriter v1.2.0
-	github.com/oschwald/maxminddb-golang v1.13.1
+	github.com/oschwald/maxminddb-golang/v2 v2.8.0
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb
 )
 
-require (
-	github.com/oschwald/maxminddb-golang/v2 v2.8.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
-)
+require golang.org/x/sys v0.49.0 // indirect

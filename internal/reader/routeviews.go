@@ -1,7 +1,7 @@
 package reader
 
 import (
-	"net"
+	"net/netip"
 
 	"merged-ip-data/internal/config"
 )
@@ -27,7 +27,7 @@ func OpenRouteViewsASN() (*RouteViewsASNReader, error) {
 }
 
 // Lookup looks up an IP address in the Origin ASN database.
-func (r *RouteViewsASNReader) Lookup(ip net.IP) (*RouteViewsASNRecord, error) {
+func (r *RouteViewsASNReader) Lookup(ip netip.Addr) (*RouteViewsASNRecord, error) {
 	var record RouteViewsASNRecord
 	err := r.Reader.Lookup(ip, &record)
 	if err != nil {
@@ -37,16 +37,16 @@ func (r *RouteViewsASNReader) Lookup(ip net.IP) (*RouteViewsASNRecord, error) {
 }
 
 // LookupTo looks up an IP address into a pre-allocated record to reduce allocations
-func (r *RouteViewsASNReader) LookupTo(ip net.IP, record *RouteViewsASNRecord) error {
+func (r *RouteViewsASNReader) LookupTo(ip netip.Addr, record *RouteViewsASNRecord) error {
 	return r.Reader.Lookup(ip, record)
 }
 
 // LookupNetwork looks up an IP and returns the network and record
-func (r *RouteViewsASNReader) LookupNetwork(ip net.IP) (*net.IPNet, *RouteViewsASNRecord, bool, error) {
+func (r *RouteViewsASNReader) LookupNetwork(ip netip.Addr) (netip.Prefix, *RouteViewsASNRecord, bool, error) {
 	var record RouteViewsASNRecord
 	network, ok, err := r.Reader.LookupNetwork(ip, &record)
 	if err != nil {
-		return nil, nil, false, err
+		return netip.Prefix{}, nil, false, err
 	}
 	if !ok {
 		return network, nil, false, nil
@@ -56,10 +56,10 @@ func (r *RouteViewsASNReader) LookupNetwork(ip net.IP) (*net.IPNet, *RouteViewsA
 
 // LookupNetworkTo looks up an IP into a pre-allocated record and returns the
 // matched network. The caller should reset record before reuse.
-func (r *RouteViewsASNReader) LookupNetworkTo(ip net.IP, record *RouteViewsASNRecord) (*net.IPNet, bool, error) {
+func (r *RouteViewsASNReader) LookupNetworkTo(ip netip.Addr, record *RouteViewsASNRecord) (netip.Prefix, bool, error) {
 	network, ok, err := r.Reader.LookupNetwork(ip, record)
 	if err != nil {
-		return nil, false, err
+		return netip.Prefix{}, false, err
 	}
 	return network, ok, nil
 }

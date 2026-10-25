@@ -1,7 +1,7 @@
 package reader
 
 import (
-	"net"
+	"net/netip"
 
 	"merged-ip-data/internal/config"
 )
@@ -27,7 +27,7 @@ func OpenGeoLite2ASN() (*GeoLite2ASNReader, error) {
 }
 
 // Lookup looks up an IP address in the GeoLite2-ASN database
-func (r *GeoLite2ASNReader) Lookup(ip net.IP) (*GeoLite2ASNRecord, error) {
+func (r *GeoLite2ASNReader) Lookup(ip netip.Addr) (*GeoLite2ASNRecord, error) {
 	var record GeoLite2ASNRecord
 	err := r.Reader.Lookup(ip, &record)
 	if err != nil {
@@ -37,16 +37,16 @@ func (r *GeoLite2ASNReader) Lookup(ip net.IP) (*GeoLite2ASNRecord, error) {
 }
 
 // LookupTo looks up an IP address into a pre-allocated record to reduce allocations
-func (r *GeoLite2ASNReader) LookupTo(ip net.IP, record *GeoLite2ASNRecord) error {
+func (r *GeoLite2ASNReader) LookupTo(ip netip.Addr, record *GeoLite2ASNRecord) error {
 	return r.Reader.Lookup(ip, record)
 }
 
 // LookupNetwork looks up an IP and returns the network and record
-func (r *GeoLite2ASNReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoLite2ASNRecord, bool, error) {
+func (r *GeoLite2ASNReader) LookupNetwork(ip netip.Addr) (netip.Prefix, *GeoLite2ASNRecord, bool, error) {
 	var record GeoLite2ASNRecord
 	network, ok, err := r.Reader.LookupNetwork(ip, &record)
 	if err != nil {
-		return nil, nil, false, err
+		return netip.Prefix{}, nil, false, err
 	}
 	if !ok {
 		return network, nil, false, nil
@@ -56,10 +56,10 @@ func (r *GeoLite2ASNReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoLite2ASNRe
 
 // LookupNetworkTo looks up an IP into a pre-allocated record and returns the
 // matched network. The caller should reset record before reuse.
-func (r *GeoLite2ASNReader) LookupNetworkTo(ip net.IP, record *GeoLite2ASNRecord) (*net.IPNet, bool, error) {
+func (r *GeoLite2ASNReader) LookupNetworkTo(ip netip.Addr, record *GeoLite2ASNRecord) (netip.Prefix, bool, error) {
 	network, ok, err := r.Reader.LookupNetwork(ip, record)
 	if err != nil {
-		return nil, false, err
+		return netip.Prefix{}, false, err
 	}
 	return network, ok, nil
 }

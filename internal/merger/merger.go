@@ -17,6 +17,7 @@ import (
 
 	"github.com/maxmind/mmdbwriter"
 	"github.com/maxmind/mmdbwriter/mmdbtype"
+	"github.com/oschwald/maxminddb-golang/v2"
 	"go4.org/netipx"
 )
 
@@ -493,32 +494,32 @@ func (m *Merger) processDBIPReader(r *reader.Reader) error {
 		return cached, nil
 	}
 
-	networks := r.Networks()
-	for networks.Next() {
-		network, offset, err := reader.NetworkOffset(networks)
+	for result := range r.Networks() {
+		prefix, _, err := sourceNetwork(result)
 		if err != nil {
 			return fmt.Errorf("failed to read DB-IP network: %w", err)
 		}
+		offset := result.Offset()
 		source, err := record(sourceRecordKey{offset: offset})
 		if err != nil {
-			return fmt.Errorf("failed to decode DB-IP network %s: %w", network, err)
+			return fmt.Errorf("failed to decode DB-IP network %s: %w", prefix, err)
 		}
 		if !source.hasGeo {
 			continue
 		}
 
-		for _, prefix := range m.geoUncoveredPrefixes(network) {
-			uncovered := netipPrefixToIPNet(prefix)
+		for _, uncoveredPrefix := range m.geoUncoveredPrefixes(prefix) {
+			uncovered := netipPrefixToIPNet(uncoveredPrefix)
 			if uncovered == nil {
 				continue
 			}
 			m.stats.TotalNetworks++
 			value := source.value
 			if !source.hasCountry {
-				if country := m.fallbackCountry(uncovered.IP); country != "" {
+				if country := m.fallbackCountry(uncoveredPrefix.Addr()); country != "" {
 					withCountry, err := record(sourceRecordKey{offset: offset, country: country})
 					if err != nil {
-						return fmt.Errorf("failed to decode DB-IP network %s: %w", network, err)
+						return fmt.Errorf("failed to decode DB-IP network %s: %w", prefix, err)
 					}
 					value = withCountry.value
 				}
@@ -536,9 +537,6 @@ func (m *Merger) processDBIPReader(r *reader.Reader) error {
 			m.stats.DBIPHits++
 			m.stats.ProcessedNetworks++
 		}
-	}
-	if err := networks.Err(); err != nil {
-		return err
 	}
 	fmt.Printf("  DB-IP: %d distinct records\n", len(records))
 	return nil
@@ -562,11 +560,7 @@ func appendCoalescedIPRange(ranges []netipx.IPRange, next netipx.IPRange) []neti
 	return append(ranges, next)
 }
 
-func (m *Merger) geoUncoveredPrefixes(network *net.IPNet) []netip.Prefix {
-	prefix, ok := netipx.FromStdIPNet(network)
-	if !ok {
-		return nil
-	}
+func (m *Merger) geoUncoveredPrefixes(prefix netip.Prefix) []netip.Prefix {
 	target := netipx.RangeOfPrefix(prefix)
 	start, end := target.From(), target.To()
 	i := sort.Search(len(m.geoPrimaryRanges), func(i int) bool {
@@ -595,14 +589,24 @@ func (m *Merger) geoUncoveredPrefixes(network *net.IPNet) []netip.Prefix {
 	return result
 }
 
-func networkContains(outer, inner *net.IPNet) bool {
-	if outer == nil || inner == nil {
-		return false
+func networkContains(outer, inner netip.Prefix) bool {
+	return outer.IsValid() && inner.IsValid() &&
+		outer.Addr().BitLen() == inner.Addr().BitLen() &&
+		outer.Bits() <= inner.Bits() && outer.Contains(inner.Addr())
+}
+
+// sourceNetwork returns a source network's prefix and the *net.IPNet form
+// the tree takes.
+func sourceNetwork(result maxminddb.Result) (netip.Prefix, *net.IPNet, error) {
+	if err := result.Err(); err != nil {
+		return netip.Prefix{}, nil, err
 	}
-	outerOnes, outerBits := outer.Mask.Size()
-	innerOnes, innerBits := inner.Mask.Size()
-	return outerOnes >= 0 && innerOnes >= 0 && outerBits == innerBits &&
-		outerOnes <= innerOnes && outer.Contains(inner.IP)
+	prefix := result.Prefix()
+	network := netipPrefixToIPNet(prefix)
+	if network == nil {
+		return prefix, nil, fmt.Errorf("invalid network %s", prefix)
+	}
+	return prefix, network, nil
 }
 
 // mergedRecordFromDBIP fills record with DB-IP as the primary geo source.
@@ -657,13 +661,13 @@ func subdivisionsFromDBIP(record *reader.DBIPCityRecord) []SubdivisionRecord {
 func (m *Merger) processCountryFallbackNetworks() error {
 	// The database has only a few hundred distinct records, one per country.
 	fallbacks := make(map[uintptr]mmdbtype.Map)
-	networks := m.geoWhoisCountry.Networks()
 	processed, changed, skipped := 0, 0, 0
-	for networks.Next() {
-		network, offset, err := reader.NetworkOffset(networks)
+	for result := range m.geoWhoisCountry.Networks() {
+		_, network, err := sourceNetwork(result)
 		if err != nil {
 			return fmt.Errorf("failed to read GeoLite2 Country network: %w", err)
 		}
+		offset := result.Offset()
 		fallback, ok := fallbacks[offset]
 		if !ok {
 			var source reader.GeoWhoisCountryRecord
@@ -690,9 +694,6 @@ func (m *Merger) processCountryFallbackNetworks() error {
 		if didChange {
 			changed++
 		}
-	}
-	if err := networks.Err(); err != nil {
-		return err
 	}
 	m.stats.GeoWhoisCountryHits += int64(changed)
 	fmt.Printf("GeoLite2 Country fallback networks: %d processed, %d changed, %d skipped\n", processed, changed, skipped)
@@ -754,30 +755,32 @@ func (m *Merger) processASNNetworks() error {
 }
 
 func (m *Merger) processRouteViewsASNNetworks() error {
-	networks := m.routeViewsASN.Networks()
 	inserted, skipped, shadowed := 0, 0, 0
 	var ipinfoRecord reader.IPinfoLiteRecord
 	var geoRecord reader.GeoLite2ASNRecord
-	for networks.Next() {
-		var source reader.RouteViewsASNRecord
-		network, err := networks.Network(&source)
+	for result := range m.routeViewsASN.Networks() {
+		prefix, network, err := sourceNetwork(result)
 		if err != nil {
 			return fmt.Errorf("failed to read Origin ASN network: %w", err)
+		}
+		var source reader.RouteViewsASNRecord
+		if err := result.Decode(&source); err != nil {
+			return fmt.Errorf("failed to decode Origin ASN network %s: %w", prefix, err)
 		}
 		if !source.HasASN() {
 			continue
 		}
 		ipinfoRecord.Reset()
-		if higher, ok, err := m.ipinfoLite.LookupNetworkTo(network.IP, &ipinfoRecord); err != nil {
+		if higher, ok, err := m.ipinfoLite.LookupNetworkTo(prefix.Addr(), &ipinfoRecord); err != nil {
 			return fmt.Errorf("failed to check IPinfo coverage for Origin ASN network %s: %w", network, err)
-		} else if ok && ipinfoRecord.HasASN() && networkContains(higher, network) {
+		} else if ok && ipinfoRecord.HasASN() && networkContains(higher, prefix) {
 			shadowed++
 			continue
 		}
 		geoRecord.Reset()
-		if higher, ok, err := m.geoLiteASN.LookupNetworkTo(network.IP, &geoRecord); err != nil {
+		if higher, ok, err := m.geoLiteASN.LookupNetworkTo(prefix.Addr(), &geoRecord); err != nil {
 			return fmt.Errorf("failed to check GeoLite2-ASN coverage for Origin ASN network %s: %w", network, err)
-		} else if ok && geoRecord.HasASN() && networkContains(higher, network) {
+		} else if ok && geoRecord.HasASN() && networkContains(higher, prefix) {
 			shadowed++
 			continue
 		}
@@ -794,30 +797,29 @@ func (m *Merger) processRouteViewsASNNetworks() error {
 		m.stats.RouteViewsASNHits++
 		m.countASNDerivedFlags(asn, overlay)
 	}
-	if err := networks.Err(); err != nil {
-		return err
-	}
 	fmt.Printf("  Origin ASN networks: %d inserted, %d shadowed, %d skipped\n", inserted, shadowed, skipped)
 	return nil
 }
 
 func (m *Merger) processGeoLiteASNNetworks() error {
-	networks := m.geoLiteASN.Networks()
 	inserted, skipped, shadowed := 0, 0, 0
 	var ipinfoRecord reader.IPinfoLiteRecord
-	for networks.Next() {
-		var source reader.GeoLite2ASNRecord
-		network, err := networks.Network(&source)
+	for result := range m.geoLiteASN.Networks() {
+		prefix, network, err := sourceNetwork(result)
 		if err != nil {
 			return fmt.Errorf("failed to read GeoLite2-ASN network: %w", err)
+		}
+		var source reader.GeoLite2ASNRecord
+		if err := result.Decode(&source); err != nil {
+			return fmt.Errorf("failed to decode GeoLite2-ASN network %s: %w", prefix, err)
 		}
 		if !source.HasASN() {
 			continue
 		}
 		ipinfoRecord.Reset()
-		if higher, ok, err := m.ipinfoLite.LookupNetworkTo(network.IP, &ipinfoRecord); err != nil {
+		if higher, ok, err := m.ipinfoLite.LookupNetworkTo(prefix.Addr(), &ipinfoRecord); err != nil {
 			return fmt.Errorf("failed to check IPinfo coverage for GeoLite2-ASN network %s: %w", network, err)
-		} else if ok && ipinfoRecord.HasASN() && networkContains(higher, network) {
+		} else if ok && ipinfoRecord.HasASN() && networkContains(higher, prefix) {
 			shadowed++
 			continue
 		}
@@ -834,21 +836,20 @@ func (m *Merger) processGeoLiteASNNetworks() error {
 		m.stats.GeoLiteASNHits++
 		m.countASNDerivedFlags(asn, overlay)
 	}
-	if err := networks.Err(); err != nil {
-		return err
-	}
 	fmt.Printf("  GeoLite2-ASN networks: %d inserted, %d shadowed, %d skipped\n", inserted, shadowed, skipped)
 	return nil
 }
 
 func (m *Merger) processIPinfoASNNetworks() error {
-	networks := m.ipinfoLite.Networks()
 	inserted, skipped := 0, 0
-	for networks.Next() {
-		var source reader.IPinfoLiteRecord
-		network, err := networks.Network(&source)
+	for result := range m.ipinfoLite.Networks() {
+		prefix, network, err := sourceNetwork(result)
 		if err != nil {
 			return fmt.Errorf("failed to read IPinfo ASN network: %w", err)
+		}
+		var source reader.IPinfoLiteRecord
+		if err := result.Decode(&source); err != nil {
+			return fmt.Errorf("failed to decode IPinfo ASN network %s: %w", prefix, err)
 		}
 		if !source.HasASN() {
 			continue
@@ -865,9 +866,6 @@ func (m *Merger) processIPinfoASNNetworks() error {
 		inserted++
 		m.stats.IPinfoLiteHits++
 		m.countASNDerivedFlags(asn, overlay)
-	}
-	if err := networks.Err(); err != nil {
-		return err
 	}
 	fmt.Printf("  IPinfo ASN networks: %d inserted, %d skipped\n", inserted, skipped)
 	return nil

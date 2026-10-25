@@ -1,10 +1,10 @@
 package reader
 
 import (
-	"math/big"
-	"net"
+	"iter"
+	"net/netip"
 
-	"github.com/oschwald/maxminddb-golang"
+	"github.com/oschwald/maxminddb-golang/v2"
 )
 
 // Reader wraps a maxminddb.Reader with helper methods
@@ -33,63 +33,38 @@ func (r *Reader) Path() string {
 }
 
 // Lookup looks up an IP address and decodes into the provided result
-func (r *Reader) Lookup(ip net.IP, result interface{}) error {
-	return r.db.Lookup(ip, result)
+func (r *Reader) Lookup(ip netip.Addr, result any) error {
+	return r.db.Lookup(ip).Decode(result)
 }
 
 // LookupNetwork looks up an IP and returns the network and whether a record was found
-func (r *Reader) LookupNetwork(ip net.IP, result interface{}) (*net.IPNet, bool, error) {
-	return r.db.LookupNetwork(ip, result)
+func (r *Reader) LookupNetwork(ip netip.Addr, result any) (netip.Prefix, bool, error) {
+	res := r.db.Lookup(ip)
+	if err := res.Err(); err != nil {
+		return netip.Prefix{}, false, err
+	}
+	if !res.Found() {
+		return res.Prefix(), false, nil
+	}
+	return res.Prefix(), true, res.Decode(result)
 }
 
-// Networks returns an iterator over all networks in the database
-func (r *Reader) Networks() *maxminddb.Networks {
-	return r.db.Networks(maxminddb.SkipAliasedNetworks)
+// Networks returns an iterator over all networks in the database. IPv4
+// networks are yielded once, as IPv4 prefixes, rather than at every alias in
+// an IPv6 database. Networks that share a record share its Offset, so callers
+// can decode and convert each distinct record once with Decode.
+func (r *Reader) Networks() iter.Seq[maxminddb.Result] {
+	return r.db.Networks()
 }
 
-// Decode decodes the record at a data section offset returned by NetworkOffset
-func (r *Reader) Decode(offset uintptr, result interface{}) error {
-	return r.db.Decode(offset, result)
+// Decode decodes the record at a data section offset from a Networks result
+func (r *Reader) Decode(offset uintptr, result any) error {
+	return r.db.LookupOffset(offset).Decode(result)
 }
-
-// NetworkOffset returns the iterator's current network and the data section
-// offset of its record, without decoding the record. Networks that share a
-// record share an offset, so callers can decode and convert each distinct
-// record once and reuse the result.
-func NetworkOffset(networks *maxminddb.Networks) (*net.IPNet, uintptr, error) {
-	var record recordOffset
-	network, err := networks.Network(&record)
-	return network, record.offset, err
-}
-
-// recordOffset is a maxminddb deserializer that records the offset of the
-// value it is asked to decode and skips decoding it.
-type recordOffset struct {
-	offset uintptr
-}
-
-func (r *recordOffset) ShouldSkip(offset uintptr) (bool, error) {
-	r.offset = offset
-	return true, nil
-}
-
-func (*recordOffset) StartSlice(uint) error  { return nil }
-func (*recordOffset) StartMap(uint) error    { return nil }
-func (*recordOffset) End() error             { return nil }
-func (*recordOffset) String(string) error    { return nil }
-func (*recordOffset) Float64(float64) error  { return nil }
-func (*recordOffset) Bytes([]byte) error     { return nil }
-func (*recordOffset) Uint16(uint16) error    { return nil }
-func (*recordOffset) Uint32(uint32) error    { return nil }
-func (*recordOffset) Int32(int32) error      { return nil }
-func (*recordOffset) Uint64(uint64) error    { return nil }
-func (*recordOffset) Uint128(*big.Int) error { return nil }
-func (*recordOffset) Bool(bool) error        { return nil }
-func (*recordOffset) Float32(float32) error  { return nil }
 
 // NetworksWithin returns an iterator over networks within the specified network
-func (r *Reader) NetworksWithin(network *net.IPNet) *maxminddb.Networks {
-	return r.db.NetworksWithin(network, maxminddb.SkipAliasedNetworks)
+func (r *Reader) NetworksWithin(prefix netip.Prefix) iter.Seq[maxminddb.Result] {
+	return r.db.NetworksWithin(prefix)
 }
 
 // Metadata returns the database metadata

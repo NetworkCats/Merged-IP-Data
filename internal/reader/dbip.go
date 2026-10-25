@@ -1,7 +1,7 @@
 package reader
 
 import (
-	"net"
+	"net/netip"
 
 	"merged-ip-data/internal/config"
 )
@@ -60,11 +60,11 @@ func (r *DBIPCityReader) Close() error {
 }
 
 // Lookup looks up an IP address in the appropriate DB-IP database
-func (r *DBIPCityReader) Lookup(ip net.IP) (*DBIPCityRecord, error) {
+func (r *DBIPCityReader) Lookup(ip netip.Addr) (*DBIPCityRecord, error) {
 	var record DBIPCityRecord
 	var err error
 
-	if ip.To4() != nil {
+	if ip = ip.Unmap(); ip.Is4() {
 		err = r.ipv4Reader.Lookup(ip, &record)
 	} else {
 		err = r.ipv6Reader.Lookup(ip, &record)
@@ -77,20 +77,20 @@ func (r *DBIPCityReader) Lookup(ip net.IP) (*DBIPCityRecord, error) {
 }
 
 // LookupNetwork looks up an IP and returns the network and record
-func (r *DBIPCityReader) LookupNetwork(ip net.IP) (*net.IPNet, *DBIPCityRecord, bool, error) {
+func (r *DBIPCityReader) LookupNetwork(ip netip.Addr) (netip.Prefix, *DBIPCityRecord, bool, error) {
 	var record DBIPCityRecord
-	var network *net.IPNet
+	var network netip.Prefix
 	var ok bool
 	var err error
 
-	if ip.To4() != nil {
+	if ip = ip.Unmap(); ip.Is4() {
 		network, ok, err = r.ipv4Reader.LookupNetwork(ip, &record)
 	} else {
 		network, ok, err = r.ipv6Reader.LookupNetwork(ip, &record)
 	}
 
 	if err != nil {
-		return nil, nil, false, err
+		return netip.Prefix{}, nil, false, err
 	}
 	if !ok {
 		return network, nil, false, nil

@@ -1,7 +1,7 @@
 package reader
 
 import (
-	"net"
+	"net/netip"
 
 	"merged-ip-data/internal/config"
 )
@@ -26,7 +26,7 @@ func OpenGeoWhoisCountry() (*GeoWhoisCountryReader, error) {
 }
 
 // Lookup looks up an IP address in the GeoLite2 Country database.
-func (r *GeoWhoisCountryReader) Lookup(ip net.IP) (*GeoWhoisCountryRecord, error) {
+func (r *GeoWhoisCountryReader) Lookup(ip netip.Addr) (*GeoWhoisCountryRecord, error) {
 	var record GeoWhoisCountryRecord
 	err := r.Reader.Lookup(ip, &record)
 	if err != nil {
@@ -36,16 +36,16 @@ func (r *GeoWhoisCountryReader) Lookup(ip net.IP) (*GeoWhoisCountryRecord, error
 }
 
 // LookupTo looks up an IP address into a pre-allocated record to reduce allocations
-func (r *GeoWhoisCountryReader) LookupTo(ip net.IP, record *GeoWhoisCountryRecord) error {
+func (r *GeoWhoisCountryReader) LookupTo(ip netip.Addr, record *GeoWhoisCountryRecord) error {
 	return r.Reader.Lookup(ip, record)
 }
 
 // LookupNetwork looks up an IP and returns the network and record
-func (r *GeoWhoisCountryReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoWhoisCountryRecord, bool, error) {
+func (r *GeoWhoisCountryReader) LookupNetwork(ip netip.Addr) (netip.Prefix, *GeoWhoisCountryRecord, bool, error) {
 	var record GeoWhoisCountryRecord
 	network, ok, err := r.Reader.LookupNetwork(ip, &record)
 	if err != nil {
-		return nil, nil, false, err
+		return netip.Prefix{}, nil, false, err
 	}
 	if !ok {
 		return network, nil, false, nil

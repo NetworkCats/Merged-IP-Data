@@ -10,7 +10,7 @@ import (
 	"github.com/maxmind/mmdbwriter/mmdbtype"
 )
 
-func TestNetworkOffsetSharesOffsetForSharedRecord(t *testing.T) {
+func TestNetworksShareOffsetForSharedRecord(t *testing.T) {
 	tree, err := mmdbwriter.New(mmdbwriter.Options{DatabaseType: "test", IPVersion: 4})
 	if err != nil {
 		t.Fatal(err)
@@ -45,16 +45,11 @@ func TestNetworkOffsetSharesOffsetForSharedRecord(t *testing.T) {
 	defer r.Close()
 
 	offsets := map[string]uintptr{}
-	networks := r.Networks()
-	for networks.Next() {
-		network, offset, err := NetworkOffset(networks)
-		if err != nil {
+	for result := range r.Networks() {
+		if err := result.Err(); err != nil {
 			t.Fatal(err)
 		}
-		offsets[network.String()] = offset
-	}
-	if err := networks.Err(); err != nil {
-		t.Fatal(err)
+		offsets[result.Prefix().String()] = result.Offset()
 	}
 
 	if len(offsets) != 3 {

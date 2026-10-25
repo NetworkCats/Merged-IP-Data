@@ -1,7 +1,6 @@
 package merger
 
 import (
-	"net"
 	"net/netip"
 	"testing"
 
@@ -237,11 +236,7 @@ func TestGeoUncoveredPrefixesReturnsOnlyCoverageGaps(t *testing.T) {
 		netipx.RangeOfPrefix(netip.MustParsePrefix("10.0.0.0/25")),
 		netipx.RangeOfPrefix(netip.MustParsePrefix("10.0.0.192/26")),
 	}}
-	_, network, err := net.ParseCIDR("10.0.0.0/24")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := m.geoUncoveredPrefixes(network)
+	got := m.geoUncoveredPrefixes(netip.MustParsePrefix("10.0.0.0/24"))
 	want := []netip.Prefix{netip.MustParsePrefix("10.0.0.128/26")}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("uncovered prefixes = %v, want %v", got, want)

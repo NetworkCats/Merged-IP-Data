@@ -1,7 +1,7 @@
 package reader
 
 import (
-	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -38,7 +38,7 @@ func OpenIPinfoLite() (*IPinfoLiteReader, error) {
 }
 
 // Lookup looks up an IP address in the IPinfo Lite database
-func (r *IPinfoLiteReader) Lookup(ip net.IP) (*IPinfoLiteRecord, error) {
+func (r *IPinfoLiteReader) Lookup(ip netip.Addr) (*IPinfoLiteRecord, error) {
 	var record IPinfoLiteRecord
 	err := r.Reader.Lookup(ip, &record)
 	if err != nil {
@@ -48,16 +48,16 @@ func (r *IPinfoLiteReader) Lookup(ip net.IP) (*IPinfoLiteRecord, error) {
 }
 
 // LookupTo looks up an IP address into a pre-allocated record to reduce allocations
-func (r *IPinfoLiteReader) LookupTo(ip net.IP, record *IPinfoLiteRecord) error {
+func (r *IPinfoLiteReader) LookupTo(ip netip.Addr, record *IPinfoLiteRecord) error {
 	return r.Reader.Lookup(ip, record)
 }
 
 // LookupNetwork looks up an IP and returns the network and record
-func (r *IPinfoLiteReader) LookupNetwork(ip net.IP) (*net.IPNet, *IPinfoLiteRecord, bool, error) {
+func (r *IPinfoLiteReader) LookupNetwork(ip netip.Addr) (netip.Prefix, *IPinfoLiteRecord, bool, error) {
 	var record IPinfoLiteRecord
 	network, ok, err := r.Reader.LookupNetwork(ip, &record)
 	if err != nil {
-		return nil, nil, false, err
+		return netip.Prefix{}, nil, false, err
 	}
 	if !ok {
 		return network, nil, false, nil
@@ -67,10 +67,10 @@ func (r *IPinfoLiteReader) LookupNetwork(ip net.IP) (*net.IPNet, *IPinfoLiteReco
 
 // LookupNetworkTo looks up an IP into a pre-allocated record and returns the
 // matched network. The caller should reset record before reuse.
-func (r *IPinfoLiteReader) LookupNetworkTo(ip net.IP, record *IPinfoLiteRecord) (*net.IPNet, bool, error) {
+func (r *IPinfoLiteReader) LookupNetworkTo(ip netip.Addr, record *IPinfoLiteRecord) (netip.Prefix, bool, error) {
 	network, ok, err := r.Reader.LookupNetwork(ip, record)
 	if err != nil {
-		return nil, false, err
+		return netip.Prefix{}, false, err
 	}
 	return network, ok, nil
 }

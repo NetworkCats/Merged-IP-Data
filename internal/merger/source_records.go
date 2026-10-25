@@ -2,7 +2,7 @@ package merger
 
 import (
 	"fmt"
-	"net"
+	"net/netip"
 
 	"merged-ip-data/internal/reader"
 
@@ -30,7 +30,7 @@ type sourceRecord struct {
 }
 
 // fallbackCountry returns the GeoLite2 Country code for ip, or "" if none.
-func (m *Merger) fallbackCountry(ip net.IP) string {
+func (m *Merger) fallbackCountry(ip netip.Addr) string {
 	m.reusableGeoWhoisRecord.Reset()
 	if err := m.geoWhoisCountry.LookupTo(ip, &m.reusableGeoWhoisRecord); err != nil || !m.reusableGeoWhoisRecord.HasCountry() {
 		return ""
@@ -73,29 +73,25 @@ func (m *Merger) processGeoLiteCityNetworks() error {
 		return cached, nil
 	}
 
-	networks := m.geoLiteCity.Networks()
 	primaryRanges := make([]netipx.IPRange, 0, 4096)
 	var inserted int64
-	for networks.Next() {
-		network, offset, err := reader.NetworkOffset(networks)
+	for result := range m.geoLiteCity.Networks() {
+		prefix, network, err := sourceNetwork(result)
 		if err != nil {
 			return fmt.Errorf("failed to read GeoLite2-City network: %w", err)
 		}
+		offset := result.Offset()
 		source, err := record(sourceRecordKey{offset: offset})
 		if err != nil {
-			return fmt.Errorf("failed to decode GeoLite2-City network %s: %w", network, err)
+			return fmt.Errorf("failed to decode GeoLite2-City network %s: %w", prefix, err)
 		}
 		if source.hasPrimary {
-			prefix, ok := netipx.FromStdIPNet(network)
-			if !ok {
-				return fmt.Errorf("invalid GeoLite2-City network %s", network)
-			}
 			primaryRanges = appendCoalescedIPRange(primaryRanges, netipx.RangeOfPrefix(prefix))
 		}
 		if !source.hasCountry {
-			if country := m.fallbackCountry(network.IP); country != "" {
+			if country := m.fallbackCountry(prefix.Addr()); country != "" {
 				if source, err = record(sourceRecordKey{offset: offset, country: country}); err != nil {
-					return fmt.Errorf("failed to decode GeoLite2-City network %s: %w", network, err)
+					return fmt.Errorf("failed to decode GeoLite2-City network %s: %w", prefix, err)
 				}
 			}
 		}
@@ -112,15 +108,12 @@ func (m *Merger) processGeoLiteCityNetworks() error {
 			if isSkippableInsertError(err) {
 				continue
 			}
-			return fmt.Errorf("failed to insert network %s: %w", network, err)
+			return fmt.Errorf("failed to insert network %s: %w", prefix, err)
 		}
 		inserted++
 		if inserted%100000 == 0 {
 			fmt.Printf("  Inserted %d networks...\n", inserted)
 		}
-	}
-	if err := networks.Err(); err != nil {
-		return err
 	}
 
 	m.geoPrimaryRanges = primaryRanges

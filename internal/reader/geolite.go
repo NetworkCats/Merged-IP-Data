@@ -1,7 +1,7 @@
 package reader
 
 import (
-	"net"
+	"net/netip"
 
 	"merged-ip-data/internal/config"
 )
@@ -59,7 +59,7 @@ func OpenGeoLite2City() (*GeoLite2CityReader, error) {
 }
 
 // Lookup looks up an IP address in the GeoLite2-City database
-func (r *GeoLite2CityReader) Lookup(ip net.IP) (*GeoLite2CityRecord, error) {
+func (r *GeoLite2CityReader) Lookup(ip netip.Addr) (*GeoLite2CityRecord, error) {
 	var record GeoLite2CityRecord
 	err := r.Reader.Lookup(ip, &record)
 	if err != nil {
@@ -69,16 +69,16 @@ func (r *GeoLite2CityReader) Lookup(ip net.IP) (*GeoLite2CityRecord, error) {
 }
 
 // LookupTo looks up an IP address into a pre-allocated record to reduce allocations
-func (r *GeoLite2CityReader) LookupTo(ip net.IP, record *GeoLite2CityRecord) error {
+func (r *GeoLite2CityReader) LookupTo(ip netip.Addr, record *GeoLite2CityRecord) error {
 	return r.Reader.Lookup(ip, record)
 }
 
 // LookupNetwork looks up an IP and returns the network and record
-func (r *GeoLite2CityReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoLite2CityRecord, bool, error) {
+func (r *GeoLite2CityReader) LookupNetwork(ip netip.Addr) (netip.Prefix, *GeoLite2CityRecord, bool, error) {
 	var record GeoLite2CityRecord
 	network, ok, err := r.Reader.LookupNetwork(ip, &record)
 	if err != nil {
-		return nil, nil, false, err
+		return netip.Prefix{}, nil, false, err
 	}
 	if !ok {
 		return network, nil, false, nil
@@ -88,10 +88,10 @@ func (r *GeoLite2CityReader) LookupNetwork(ip net.IP) (*net.IPNet, *GeoLite2City
 
 // LookupNetworkTo looks up an IP into a pre-allocated record and returns the
 // effective network containing that record.
-func (r *GeoLite2CityReader) LookupNetworkTo(ip net.IP, record *GeoLite2CityRecord) (*net.IPNet, bool, error) {
+func (r *GeoLite2CityReader) LookupNetworkTo(ip netip.Addr, record *GeoLite2CityRecord) (netip.Prefix, bool, error) {
 	network, ok, err := r.Reader.LookupNetwork(ip, record)
 	if err != nil {
-		return nil, false, err
+		return netip.Prefix{}, false, err
 	}
 	return network, ok, nil
 }
