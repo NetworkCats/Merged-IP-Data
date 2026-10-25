@@ -97,7 +97,6 @@ type Merger struct {
 	// Reusable records for point-lookup sources that do not expose iterable
 	// boundaries suitable for the merge.
 	reusableGeoWhoisRecord reader.GeoWhoisCountryRecord
-	reusableQQWryRecord    reader.QQWryRecord
 }
 
 // Stats holds merge statistics
@@ -410,6 +409,12 @@ func (m *Merger) Merge() error {
 	}
 	logMemStats("After GeoLite2 Country fallback")
 
+	fmt.Println("Processing QQWry China locations (overrides Chinese province/city)...")
+	if err := m.processQQWryChinaLocations(); err != nil {
+		return fmt.Errorf("failed to process QQWry China locations: %w", err)
+	}
+	logMemStats("After QQWry China locations")
+
 	fmt.Println("Processing OpenProxyDB CIDR ranges (direct CIDR insertion)...")
 	if err := m.processOpenProxyDBCIDRRanges(); err != nil {
 		return fmt.Errorf("failed to process OpenProxyDB CIDR ranges: %w", err)
@@ -457,14 +462,13 @@ func (m *Merger) Merge() error {
 // processGeoLiteCityNetworksParallel processes GeoLite2-City networks using parallel workers.
 // This significantly speeds up processing on multi-core systems by:
 // 1. Reading networks from GeoLite2-City sequentially (iterator is not thread-safe)
-// 2. Processing country/QQWry enrichment and record encoding in parallel
+// 2. Processing country enrichment and record encoding in parallel
 // 3. Inserting results into the tree sequentially (tree is not thread-safe)
 func (m *Merger) processGeoLiteCityNetworksParallel(numWorkers int) error {
 	// Create worker pool
 	pool := newWorkerPool(
 		numWorkers,
 		m.geoWhoisCountry,
-		m.qqwry,
 	)
 
 	// Start workers
@@ -548,7 +552,6 @@ func (m *Merger) processGeoLiteCityNetworksParallel(numWorkers int) error {
 	m.stats.TotalNetworks = workerStats.TotalNetworks
 	m.stats.GeoLiteCityHits = workerStats.GeoLiteCityHits
 	m.stats.GeoWhoisCountryHits = workerStats.GeoWhoisCountryHits
-	m.stats.QQWryHits = workerStats.QQWryHits
 	m.stats.EmptyRecords = workerStats.EmptyRecords
 	m.stats.ProcessedNetworks = insertedCount
 
@@ -705,7 +708,6 @@ func (m *Merger) buildMergedRecordFromDBIP(network *net.IPNet, dbipRecord *reade
 	}
 
 	m.enrichWithCountryFallback(network.IP, record)
-	m.enrichWithQQWryData(network.IP, record)
 }
 
 func subdivisionsFromDBIP(record *reader.DBIPCityRecord) []SubdivisionRecord {
@@ -763,50 +765,6 @@ func (m *Merger) enrichWithCountryFallback(ip net.IP, record *MergedRecord) {
 	if err := m.geoWhoisCountry.LookupTo(ip, &m.reusableGeoWhoisRecord); err == nil && m.reusableGeoWhoisRecord.HasCountry() {
 		m.stats.GeoWhoisCountryHits++
 		record.Country.ISOCode = m.reusableGeoWhoisRecord.CountryCode
-	}
-}
-
-// enrichWithQQWryData adds Chinese location data from QQWry (Chunzhen) database for Chinese IPs.
-// This provides more accurate and detailed Chinese location names (zh-CN) for IPs in China.
-func (m *Merger) enrichWithQQWryData(ip net.IP, record *MergedRecord) {
-	// Only enrich for Chinese IPs
-	if record.Country.ISOCode != "CN" {
-		return
-	}
-
-	m.reusableQQWryRecord.Reset()
-	if err := m.qqwry.LookupTo(ip, &m.reusableQQWryRecord); err != nil || !m.reusableQQWryRecord.HasGeoData() {
-		return
-	}
-
-	// Verify the record is indeed for China
-	if !m.reusableQQWryRecord.IsChina() {
-		return
-	}
-
-	m.stats.QQWryHits++
-
-	// Enrich city names with Chinese (zh-CN)
-	if m.reusableQQWryRecord.HasCityData() {
-		record.City.Names = withName(record.City.Names, "zh-CN", m.reusableQQWryRecord.CityName)
-	}
-
-	// Enrich subdivision (province) names with Chinese (zh-CN)
-	if m.reusableQQWryRecord.HasRegionData() {
-		if len(record.Subdivisions) == 0 {
-			record.Subdivisions = []SubdivisionRecord{{
-				Names: map[string]string{"zh-CN": m.reusableQQWryRecord.RegionName},
-			}}
-		} else {
-			record.Subdivisions[0].Names = withName(record.Subdivisions[0].Names, "zh-CN", m.reusableQQWryRecord.RegionName)
-		}
-	}
-
-	// Add Chinese country name if not present
-	if m.reusableQQWryRecord.CountryName != "" {
-		if _, ok := record.Country.Names["zh-CN"]; !ok {
-			record.Country.Names = withName(record.Country.Names, "zh-CN", m.reusableQQWryRecord.CountryName)
-		}
 	}
 }
 
@@ -1463,7 +1421,7 @@ func (m *Merger) printStats() {
 	fmt.Printf("  Origin ASN hits: %d\n", m.stats.RouteViewsASNHits)
 	fmt.Printf("  DB-IP supplementary records: %d\n", m.stats.DBIPHits)
 	fmt.Printf("  GeoLite2 Country fallback hits: %d\n", m.stats.GeoWhoisCountryHits)
-	fmt.Printf("  QQWry (Chunzhen) China enrichment hits: %d\n", m.stats.QQWryHits)
+	fmt.Printf("  QQWry (Chunzhen) China records relocated: %d\n", m.stats.QQWryHits)
 	fmt.Printf("  OpenProxyDB proxy enrichment hits: %d\n", m.stats.OpenproxyDBHits)
 	fmt.Printf("  OpenProxyDB CIDR ranges inserted: %d\n", m.stats.OpenproxyDBCIDRRangesInserted)
 	fmt.Printf("  VPN provider ranges inserted: %d\n", m.stats.VPNProviderRangesInserted)

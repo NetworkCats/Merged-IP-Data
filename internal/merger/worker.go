@@ -22,16 +22,14 @@ type resultItem struct {
 	mmdbRecord mmdbtype.Map
 }
 
-// workerContext holds the per-worker state for country and QQWry lookups.
+// workerContext holds the per-worker state for country lookups.
 // Each worker has its own context to avoid contention.
 type workerContext struct {
 	// Database readers (shared, read-only)
 	geoWhoisCountry *reader.GeoWhoisCountryReader
-	qqwry           *reader.QQWryReader
 
 	// Per-worker reusable records (not shared between workers)
 	reusableGeoWhoisRecord reader.GeoWhoisCountryRecord
-	reusableQQWryRecord    reader.QQWryRecord
 	reusableMergedRecord   MergedRecord
 
 	// Per-worker statistics; each context is owned by one worker.
@@ -42,7 +40,6 @@ type workerContext struct {
 type workerStats struct {
 	geoLiteCityHits     int64
 	geoWhoisCountryHits int64
-	qqwryHits           int64
 	emptyRecords        int64
 }
 
@@ -62,7 +59,6 @@ type workerPool struct {
 func newWorkerPool(
 	numWorkers int,
 	geoWhoisCountry *reader.GeoWhoisCountryReader,
-	qqwry *reader.QQWryReader,
 ) *workerPool {
 	if numWorkers <= 0 {
 		numWorkers = mergeWorkerCount()
@@ -84,7 +80,6 @@ func newWorkerPool(
 	for i := 0; i < numWorkers; i++ {
 		pool.contexts[i] = &workerContext{
 			geoWhoisCountry: geoWhoisCountry,
-			qqwry:           qqwry,
 		}
 	}
 
@@ -129,7 +124,6 @@ func (p *workerPool) aggregateStats() Stats {
 	for _, ctx := range p.contexts {
 		stats.GeoLiteCityHits += ctx.stats.geoLiteCityHits
 		stats.GeoWhoisCountryHits += ctx.stats.geoWhoisCountryHits
-		stats.QQWryHits += ctx.stats.qqwryHits
 		stats.EmptyRecords += ctx.stats.emptyRecords
 	}
 
@@ -225,7 +219,6 @@ func (ctx *workerContext) buildMergedRecord(network *net.IPNet, geoRecord *reade
 	}
 
 	ctx.enrichWithCountryFallback(network.IP, record)
-	ctx.enrichWithQQWryData(network.IP, record)
 }
 
 // enrichWithCountryFallback adds country information from GeoLite2 Country when country is missing.
@@ -238,41 +231,5 @@ func (ctx *workerContext) enrichWithCountryFallback(ip net.IP, record *MergedRec
 	if err := ctx.geoWhoisCountry.LookupTo(ip, &ctx.reusableGeoWhoisRecord); err == nil && ctx.reusableGeoWhoisRecord.HasCountry() {
 		ctx.stats.geoWhoisCountryHits++
 		record.Country.ISOCode = ctx.reusableGeoWhoisRecord.CountryCode
-	}
-}
-
-// enrichWithQQWryData adds Chinese location data for Chinese IPs
-func (ctx *workerContext) enrichWithQQWryData(ip net.IP, record *MergedRecord) {
-	if record.Country.ISOCode != "CN" {
-		return
-	}
-
-	ctx.reusableQQWryRecord.Reset()
-	if err := ctx.qqwry.LookupTo(ip, &ctx.reusableQQWryRecord); err != nil || !ctx.reusableQQWryRecord.HasGeoData() {
-		return
-	}
-
-	if !ctx.reusableQQWryRecord.IsChina() {
-		return
-	}
-
-	ctx.stats.qqwryHits++
-
-	if ctx.reusableQQWryRecord.HasCityData() {
-		record.City.Names = withName(record.City.Names, "zh-CN", ctx.reusableQQWryRecord.CityName)
-	}
-
-	if ctx.reusableQQWryRecord.HasRegionData() {
-		if len(record.Subdivisions) == 0 {
-			record.Subdivisions = []SubdivisionRecord{{
-				Names: map[string]string{"zh-CN": ctx.reusableQQWryRecord.RegionName},
-			}}
-		} else {
-			record.Subdivisions[0].Names = withName(record.Subdivisions[0].Names, "zh-CN", ctx.reusableQQWryRecord.RegionName)
-		}
-	}
-
-	if _, ok := record.Country.Names["zh-CN"]; !ok {
-		record.Country.Names = withName(record.Country.Names, "zh-CN", ctx.reusableQQWryRecord.CountryName)
 	}
 }
