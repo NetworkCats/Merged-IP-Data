@@ -41,3 +41,5 @@ download/
 
 # Build artifacts
 merge-tool
+# beeps agent skill, kept local
+.claude/skills/beeps/
