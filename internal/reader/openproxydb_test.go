@@ -332,3 +332,26 @@ func writeTempFile(t *testing.T, pattern, content string) string {
 	}
 	return file.Name()
 }
+
+func TestOpenproxyDBParseIgnoresTorColumn(t *testing.T) {
+	path := writeTempFile(t, "proxy-*.csv", "ip,anonblock,proxy,vpn,cdn,rangeblock,school-block,tor,webhost\n203.0.113.8,false,false,false,false,false,false,true,false\n203.0.113.9,false,false,false,false,false,false,true,true\n")
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	r := &OpenproxyDBReader{singleIPs: make(map[netip.Addr]OpenproxyDBRecord)}
+	if err := r.parse(file); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := r.singleIPs[netip.MustParseAddr("203.0.113.8")]; ok {
+		t.Fatal("tor-only row should be skipped")
+	}
+	record := r.singleIPs[netip.MustParseAddr("203.0.113.9")]
+	if record.IsTor || record.IsAnonymous || !record.IsHosting {
+		t.Fatalf("record = %+v, want hosting only", record)
+	}
+}

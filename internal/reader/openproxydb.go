@@ -132,8 +132,9 @@ func (r *OpenproxyDBReader) parse(file *os.File) error {
 		colIndex[strings.TrimSpace(col)] = i
 	}
 
-	// Verify required columns exist
-	requiredCols := []string{"ip", "anonblock", "proxy", "vpn", "cdn", "rangeblock", "school-block", "tor", "webhost"}
+	// Verify required columns exist. The "tor" column is ignored: Tor flags
+	// come only from the Onionoo relay list loaded by LoadTorRelays.
+	requiredCols := []string{"ip", "anonblock", "proxy", "vpn", "cdn", "rangeblock", "school-block", "webhost"}
 	for _, col := range requiredCols {
 		if _, ok := colIndex[col]; !ok {
 			return fmt.Errorf("missing required column: %s", col)
@@ -147,10 +148,9 @@ func (r *OpenproxyDBReader) parse(file *os.File) error {
 	cdnIdx := colIndex["cdn"]
 	rangeblockIdx := colIndex["rangeblock"]
 	schoolIdx := colIndex["school-block"]
-	torIdx := colIndex["tor"]
 	webhostIdx := colIndex["webhost"]
 	maxRequiredIdx := ipIdx
-	for _, idx := range []int{anonblockIdx, proxyIdx, vpnIdx, cdnIdx, rangeblockIdx, schoolIdx, torIdx, webhostIdx} {
+	for _, idx := range []int{anonblockIdx, proxyIdx, vpnIdx, cdnIdx, rangeblockIdx, schoolIdx, webhostIdx} {
 		if idx > maxRequiredIdx {
 			maxRequiredIdx = idx
 		}
@@ -185,7 +185,6 @@ func (r *OpenproxyDBReader) parse(file *os.File) error {
 		cdn := parseBool(row[cdnIdx])
 		rangeblock := parseBool(row[rangeblockIdx])
 		school := parseBool(row[schoolIdx])
-		tor := parseBool(row[torIdx])
 		webhost := parseBool(row[webhostIdx])
 
 		// Build the record with computed fields
@@ -193,11 +192,10 @@ func (r *OpenproxyDBReader) parse(file *os.File) error {
 		record := OpenproxyDBRecord{
 			IsProxy:     isProxy,
 			IsVPN:       vpn,
-			IsTor:       tor,
 			IsHosting:   webhost,
 			IsCDN:       cdn,
 			IsSchool:    school,
-			IsAnonymous: isProxy || vpn || tor,
+			IsAnonymous: isProxy || vpn,
 		}
 
 		// Skip records with no flags set

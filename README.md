@@ -13,7 +13,8 @@ A Go program that merges multiple IP geolocation databases into a single, compre
 | [Origin ASN](https://github.com/sapics/ip-location-db#asn) | ASN fallback (tertiary) | IPv4 + IPv6 |
 | [GeoLite2 Country](https://github.com/sapics/ip-location-db#country) | Country fallback | IPv4 + IPv6 |
 | [QQWry (Chunzhen)](https://github.com/nmgliangwei/qqwry.ipdb) | Province and city for every mainland China IP (overrides other sources), with English names from a built-in dictionary | IPv4 + IPv6 |
-| [OpenProxyDB](https://github.com/NetworkCats/OpenProxyDB) | Proxy, VPN, Tor, hosting, and CDN detection | IPv4 + IPv6 |
+| [OpenProxyDB](https://github.com/NetworkCats/OpenProxyDB) | Proxy, VPN, hosting, and CDN detection | IPv4 + IPv6 |
+| [Tor relays (Onionoo)](https://onionoo.torproject.org/) | Tor detection (sole source of `is_tor`) for running relay OR and exit addresses | IPv4 + IPv6 |
 | [iCloud Private Relay](https://mask-api.icloud.com/egress-ip-ranges.csv) | Proxy and VPN overlay for Apple iCloud Private Relay egress ranges | IPv4 + IPv6 |
 | [X4B VPN lists](https://github.com/X4BNet/lists_vpn) | VPN ASN, hosting ASN, and VPN/hosting CIDR overlays for provider and datacenter ranges | IPv4 |
 | [NordVPN server IP list](https://gist.github.com/JamoCA/eedaf4f7cce1cb0aeb5c1039af35f0b7) | VPN overlay for NordVPN server IPs | IPv4 |
