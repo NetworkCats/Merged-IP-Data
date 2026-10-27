@@ -355,3 +355,28 @@ func TestOpenproxyDBParseIgnoresTorColumn(t *testing.T) {
 		t.Fatalf("record = %+v, want hosting only", record)
 	}
 }
+
+func TestLoadTorRelaysMarksAnonymous(t *testing.T) {
+	path := writeTempFile(t, "tor-*.json", `{"version":"8.0","relays":[{"or_addresses":["203.0.113.8:9001","[2001:db8::1]:9001"],"exit_addresses":["198.51.100.7"]}]}`)
+
+	r := &OpenproxyDBReader{singleIPs: map[netip.Addr]OpenproxyDBRecord{
+		netip.MustParseAddr("203.0.113.8"): {IsHosting: true},
+	}}
+	count, err := r.LoadTorRelays(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("count = %d, want 3", count)
+	}
+
+	for _, ip := range []string{"203.0.113.8", "2001:db8::1", "198.51.100.7"} {
+		record := r.singleIPs[netip.MustParseAddr(ip)]
+		if !record.IsTor || !record.IsAnonymous {
+			t.Fatalf("%s record = %+v, want tor and anonymous", ip, record)
+		}
+	}
+	if !r.singleIPs[netip.MustParseAddr("203.0.113.8")].IsHosting {
+		t.Fatal("existing hosting flag should be kept")
+	}
+}
